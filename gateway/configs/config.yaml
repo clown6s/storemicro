@@ -27,3 +27,6 @@ etcd:
 # 日志配置
 log:
   level: info
+# JWT 认证（与 user 服务保持一致的 secret）
+jwt:
+  secret: "store-micro-jwt-secret-2026"

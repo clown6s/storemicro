@@ -12,22 +12,29 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-
-	productv1 "gateway/api/product/v1"
-	userv1 "gateway/api/user/v1"
 )
+
+// ServiceRegistration 描述一个后端 gRPC 服务的注册信息
+type ServiceRegistration struct {
+	// Name 服务名，用于 etcd 服务发现（如 "user"、"product"）
+	Name string
+	// RegisterHandler 将 gRPC 连接注册到 grpc-gateway mux 的函数
+	RegisterHandler func(ctx context.Context, mux *runtime.ServeMux, conn *grpc.ClientConn) error
+}
 
 // GatewayProxy 封装 grpc-gateway mux 和 gRPC 连接
 type GatewayProxy struct {
-	mux         *runtime.ServeMux
-	userConn    *grpc.ClientConn
-	productConn *grpc.ClientConn
-	etcdClient  *clientv3.Client
+	mux        *runtime.ServeMux
+	conns      []*grpc.ClientConn
+	etcdClient *clientv3.Client
+	jwtSecret  string
 }
 
 // NewGatewayProxy 创建 grpc-gateway 代理
 func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
-	proxy := &GatewayProxy{}
+	proxy := &GatewayProxy{
+		jwtSecret: cfg.Jwt.Secret,
+	}
 
 	// 创建 etcd client（用于服务发现）
 	etcdClient, err := clientv3.New(clientv3.Config{
@@ -43,8 +50,6 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 	etcdRegistry := etcdreg.New(etcdClient)
 
 	// 用 discovery.NewBuilder 将 registry 包装为 gRPC resolver.Builder
-	// WithInsecure(true)：etcd 中注册的 endpoint scheme 是 "grpc"（非 TLS），
-	// 默认 insecure=false 会导致 resolver 查找 "grpcs" scheme，匹配不到任何 endpoint
 	discoveryBuilder := discovery.NewBuilder(
 		etcdRegistry,
 		discovery.WithInsecure(true),
@@ -58,61 +63,47 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
 	}
 
-	// 连接 user 服务（通过 etcd 服务发现）
-	proxy.userConn, err = grpc.NewClient("discovery:///user", dialOpts...)
-	if err != nil {
-		etcdClient.Close()
-		return nil, fmt.Errorf("failed to connect user service: %w", err)
-	}
-
-	// 连接 product 服务（通过 etcd 服务发现）
-	proxy.productConn, err = grpc.NewClient("discovery:///product", dialOpts...)
-	if err != nil {
-		proxy.userConn.Close()
-		etcdClient.Close()
-		return nil, fmt.Errorf("failed to connect product service: %w", err)
-	}
-
 	// 创建 grpc-gateway ServeMux
 	proxy.mux = runtime.NewServeMux(
 		runtime.WithErrorHandler(runtime.DefaultHTTPErrorHandler),
 	)
 
-	// 注册 user 服务 HTTP→gRPC handler
 	ctx := context.Background()
-	if err := userv1.RegisterUserHandler(ctx, proxy.mux, proxy.userConn); err != nil {
-		proxy.Close()
-		return nil, fmt.Errorf("failed to register user handler: %w", err)
-	}
 
-	// 注册 product 服务 HTTP→gRPC handler
-	if err := productv1.RegisterProductHandler(ctx, proxy.mux, proxy.productConn); err != nil {
-		proxy.Close()
-		return nil, fmt.Errorf("failed to register product handler: %w", err)
-	}
+	// 逐个连接并注册服务
+	for _, svc := range services {
+		conn, err := grpc.NewClient("discovery:///"+svc.Name, dialOpts...)
+		if err != nil {
+			proxy.Close()
+			return nil, fmt.Errorf("failed to connect %s service: %w", svc.Name, err)
+		}
+		proxy.conns = append(proxy.conns, conn)
 
-	zapLog.Info("gateway proxy initialized",
-		zap.String("user", "discovery:///user"),
-		zap.String("product", "discovery:///product"),
-	)
+		if err := svc.RegisterHandler(ctx, proxy.mux, conn); err != nil {
+			proxy.Close()
+			return nil, fmt.Errorf("failed to register %s handler: %w", svc.Name, err)
+		}
+
+		zapLog.Info("service registered", zap.String("service", svc.Name))
+	}
 
 	return proxy, nil
 }
 
-// ServeHTTP 实现 http.Handler 接口
+// ServeHTTP 实现 http.Handler 接口（JWT 认证 → grpc-gateway mux）
 func (p *GatewayProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p.mux.ServeHTTP(w, r)
+	jwtAuth(p.jwtSecret, p.mux).ServeHTTP(w, r)
 }
 
 // Close 关闭所有连接
 func (p *GatewayProxy) Close() {
 	zapLog.Info("gateway proxy closing connections...")
-	if p.userConn != nil {
-		p.userConn.Close()
+	for _, conn := range p.conns {
+		if conn != nil {
+			conn.Close()
+		}
 	}
-	if p.productConn != nil {
-		p.productConn.Close()
-	}
+	p.conns = nil
 	if p.etcdClient != nil {
 		p.etcdClient.Close()
 	}

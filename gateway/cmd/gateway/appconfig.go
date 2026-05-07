@@ -13,6 +13,7 @@ type AppConfig struct {
 	Version string       `yaml:"version"`
 	Server  ServerConfig `yaml:"server"`
 	Etcd    EtcdConfig   `yaml:"etcd"`
+	Jwt     JwtConfig    `yaml:"jwt"`
 	Log     LogConfig    `yaml:"log"`
 }
 
@@ -30,6 +31,11 @@ type EtcdConfig struct {
 // LogConfig 日志配置
 type LogConfig struct {
 	Level string `yaml:"level"`
+}
+
+// JwtConfig JWT 配置
+type JwtConfig struct {
+	Secret string `yaml:"secret"`
 }
 
 // DefaultAppConfig 返回默认配置

@@ -3,11 +3,11 @@ package snowflake
 import (
 	"context"
 	"fmt"
-	"log"
 	"time"
 
 	sf "github.com/bwmarrin/snowflake"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/zap"
 )
 
 const (
@@ -63,7 +63,10 @@ func InitWithEtcd(etcdClient *clientv3.Client, serviceName string) error {
 			// 后台续约
 			go keepAlive(etcdClient, lease.ID, key)
 
-			log.Printf("[snowflake] allocated node_id=%d for service=%s", i, serviceName)
+			zap.L().Info("snowflake: allocated node_id",
+				zap.Int("node_id", i),
+				zap.String("service", serviceName),
+			)
 			return nil
 		}
 
@@ -80,7 +83,7 @@ func keepAlive(etcdClient *clientv3.Client, leaseID clientv3.LeaseID, key string
 
 	ch, err := etcdClient.KeepAlive(ctx, leaseID)
 	if err != nil {
-		log.Printf("[snowflake] keep-alive failed: %v", err)
+		zap.L().Error("snowflake: keep-alive failed", zap.Error(err))
 		return
 	}
 
@@ -89,7 +92,7 @@ func keepAlive(etcdClient *clientv3.Client, leaseID clientv3.LeaseID, key string
 		select {
 		case resp, ok := <-ch:
 			if !ok {
-				log.Printf("[snowflake] keep-alive channel closed, node_id may be lost")
+				zap.L().Warn("snowflake: keep-alive channel closed, node_id may be lost")
 				// 尝试重新续约
 				go retryKeepAlive(etcdClient, key)
 				return
@@ -107,7 +110,7 @@ func retryKeepAlive(etcdClient *clientv3.Client, key string) {
 		ctx := context.Background()
 		lease, err := etcdClient.Grant(ctx, leaseTTL)
 		if err != nil {
-			log.Printf("[snowflake] retry grant failed: %v", err)
+			zap.L().Error("snowflake: retry grant failed", zap.Error(err))
 			continue
 		}
 
@@ -117,14 +120,14 @@ func retryKeepAlive(etcdClient *clientv3.Client, key string) {
 
 		resp, err := txn.Commit()
 		if err != nil {
-			log.Printf("[snowflake] retry txn failed: %v", err)
+			zap.L().Error("snowflake: retry txn failed", zap.Error(err))
 			continue
 		}
 
 		if resp.Succeeded {
 			ch, err := etcdClient.KeepAlive(ctx, lease.ID)
 			if err != nil {
-				log.Printf("[snowflake] retry keep-alive failed: %v", err)
+				zap.L().Error("snowflake: retry keep-alive failed", zap.Error(err))
 				continue
 			}
 			go func() {
@@ -132,18 +135,18 @@ func retryKeepAlive(etcdClient *clientv3.Client, key string) {
 					select {
 					case _, ok := <-ch:
 						if !ok {
-							log.Printf("[snowflake] retry keep-alive closed, retrying...")
+							zap.L().Warn("snowflake: retry keep-alive closed, retrying...")
 							return
 						}
 					}
 				}
 			}()
-			log.Printf("[snowflake] re-acquired node_id successfully")
+			zap.L().Info("snowflake: re-acquired node_id successfully")
 			return
 		}
 
 		// key 被别人占了，放弃重试（说明本实例可能已经不再持有这个 node_id）
-		log.Printf("[snowflake] failed to re-acquire node_id, giving up")
+		zap.L().Warn("snowflake: failed to re-acquire node_id, giving up")
 		return
 	}
 }

@@ -29,12 +29,12 @@ func NewRedis(addr, password string, db int) *Redis {
 
 // SetToken 存储 token（登录成功后将 token -> userID 写入 Redis，设置过期时间）
 func (r *Redis) SetToken(ctx context.Context, token string, userID int64, expire time.Duration) error {
-	return r.client.Set(ctx, "token:"+token, userID, expire).Err()
+	return r.client.Set(ctx, "storemicro:token:"+token, userID, expire).Err()
 }
 
 // GetUserIDByToken 通过 token 查询 userID，同时起到"验证 token 是否有效"的作用
 func (r *Redis) GetUserIDByToken(ctx context.Context, token string) (int64, error) {
-	result := r.client.Get(ctx, "token:"+token)
+	result := r.client.Get(ctx, "storemicro:token:"+token)
 	if err := result.Err(); err != nil {
 		return 0, err
 	}
