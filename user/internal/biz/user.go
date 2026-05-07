@@ -36,7 +36,7 @@ type User struct {
 
 // UserRepo 数据仓库接口（由 data 层实现）
 type UserRepo interface {
-	Create(ctx context.Context, user *User) (int64, error)
+	Create(ctx context.Context, user *User) error
 	Get(ctx context.Context, id int64) (*User, error)
 	GetByPhone(ctx context.Context, phone string) (*User, error)
 	List(ctx context.Context, page, pageSize int32, phone, name string) ([]*User, int64, error)
@@ -59,26 +59,26 @@ func NewUserUsecase(repo UserRepo, j *jwt.JWT, r *redis.Redis) *UserUsecase {
 }
 
 // Register 用户注册
-func (uc *UserUsecase) Register(ctx context.Context, user *User) (int64, error) {
+func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	// 参数校验
 	if user.Phone == "" {
 		zap.L().Warn("validation failed", zap.String("method", "Register"), zap.String("reason", "phone is required"))
-		return 0, errors.New("phone is required")
+		return errors.New("phone is required")
 	}
 	if user.Password == "" {
 		zap.L().Warn("validation failed", zap.String("method", "Register"), zap.String("reason", "password is required"))
-		return 0, errors.New("password is required")
+		return errors.New("password is required")
 	}
 
 	// 手机号唯一性
 	exists, err := uc.repo.PhoneExists(ctx, user.Phone)
 	if err != nil {
 		zap.L().Error("check phone failed", zap.String("phone", user.Phone), zap.Error(err))
-		return 0, err
+		return err
 	}
 	if exists {
 		zap.L().Warn("phone already exists", zap.String("phone", user.Phone))
-		return 0, errors.New("phone already exists")
+		return errors.New("phone already exists")
 	}
 
 	// 邮箱唯一性（如果提供了邮箱）
@@ -86,11 +86,11 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) (int64, error) 
 		exists, err = uc.repo.EmailExists(ctx, user.Email)
 		if err != nil {
 			zap.L().Error("check email failed", zap.String("email", user.Email), zap.Error(err))
-			return 0, err
+			return err
 		}
 		if exists {
 			zap.L().Warn("email already exists", zap.String("email", user.Email))
-			return 0, errors.New("email already exists")
+			return errors.New("email already exists")
 		}
 	}
 
@@ -98,19 +98,19 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) (int64, error) 
 	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
 		zap.L().Error("bcrypt hash failed", zap.Error(err))
-		return 0, errors.New("password encryption failed")
+		return errors.New("password encryption failed")
 	}
 	user.Password = string(hashedPwd)
 
 	// 写入数据库
-	id, err := uc.repo.Create(ctx, user)
+	err = uc.repo.Create(ctx, user)
 	if err != nil {
 		zap.L().Error("create user failed", zap.Error(err))
-		return 0, err
+		return err
 	}
 
-	zap.L().Info("user registered", zap.Int64("id", id), zap.String("phone", user.Phone))
-	return id, nil
+	zap.L().Info("user registered", zap.String("phone", user.Phone))
+	return nil
 }
 
 // Login 用户登录（手机号+密码），返回 JWT token 和用户信息
@@ -219,30 +219,6 @@ func (uc *UserUsecase) Get(ctx context.Context, id int64) (*User, error) {
 		return nil, errors.New("invalid user id")
 	}
 	return uc.repo.Get(ctx, id)
-}
-
-// Create 创建用户（旧接口保留兼容）
-func (uc *UserUsecase) Create(ctx context.Context, phone, email string) (*User, error) {
-	if phone == "" {
-		return nil, errors.New("phone is required")
-	}
-	if email == "" {
-		return nil, errors.New("email is required")
-	}
-	exists, err := uc.repo.EmailExists(ctx, email)
-	if err != nil {
-		return nil, err
-	}
-	if exists {
-		return nil, errors.New("email already exists")
-	}
-	user := &User{Phone: phone, Email: email}
-	id, err := uc.repo.Create(ctx, user)
-	if err != nil {
-		return nil, err
-	}
-	user.ID = id
-	return user, nil
 }
 
 // Update 更新用户

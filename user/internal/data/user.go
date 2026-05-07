@@ -22,7 +22,7 @@ func NewUserRepo(data *Data) biz.UserRepo {
 	return &userRepo{data: data}
 }
 
-func (r *userRepo) Create(ctx context.Context, user *biz.User) (int64, error) {
+func (r *userRepo) Create(ctx context.Context, user *biz.User) error {
 	zap.L().Debug("userRepo.Create",
 		zap.String("phone", user.Phone),
 		zap.String("email", user.Email),
@@ -39,11 +39,11 @@ func (r *userRepo) Create(ctx context.Context, user *biz.User) (int64, error) {
 	)
 	if err != nil {
 		zap.L().Error("userRepo.Create failed", zap.Error(err))
-		return 0, err
+		return err
 	}
 
 	zap.L().Info("userRepo.Create success", zap.Int64("id", id))
-	return id, nil
+	return nil
 }
 
 func (r *userRepo) Get(ctx context.Context, id int64) (*biz.User, error) {

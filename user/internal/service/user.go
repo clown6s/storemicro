@@ -38,7 +38,9 @@ func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*use
 		return nil, s.mapError(err)
 	}
 	return &userv1.GetUserResp{
-		User: s.toUserInfo(user),
+		Code:    200,
+		Message: "success",
+		Data:    s.toUserInfo(user),
 	}, nil
 }
 
@@ -57,14 +59,14 @@ func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*u
 		Remark:   req.Remark,
 	}
 
-	id, err := s.uc.Register(ctx, user)
+	err := s.uc.Register(ctx, user)
 	if err != nil {
 		zap.L().Warn("Register failed", zap.String("phone", req.Phone), zap.Error(err))
 		return nil, s.mapError(err)
 	}
 
 	return &userv1.RegisterResp{
-		Id:      id,
+		Code:    200,
 		Message: "registered",
 	}, nil
 }
@@ -80,8 +82,10 @@ func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.
 	}
 
 	return &userv1.LoginResp{
-		Token: token,
-		User:  s.toUserInfo(user),
+		Code:    200,
+		Message: "success",
+		Token:   token,
+		Data:    s.toUserInfo(user),
 	}, nil
 }
 
@@ -95,6 +99,7 @@ func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv
 	}
 
 	return &userv1.LogoutResp{
+		Code:    200,
 		Message: "logged out",
 	}, nil
 }
@@ -120,7 +125,9 @@ func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (
 	}
 
 	return &userv1.ListUsersResp{
-		Users:    list,
+		Code:     200,
+		Message:  "success",
+		Data:     list,
 		Total:    total,
 		Page:     req.Page,
 		PageSize: req.PageSize,
@@ -145,7 +152,6 @@ func (s *UserService) toUserInfo(u *biz.User) *userv1.UserInfo {
 	}
 }
 
-// mapError 将业务错误映射为 gRPC 状态码
 func (s *UserService) mapError(err error) error {
 	if err == nil {
 		return nil

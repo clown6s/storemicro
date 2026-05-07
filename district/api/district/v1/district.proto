@@ -17,6 +17,12 @@ service District {
 message GetProvinceTreeReq {}
 
 message GetProvinceTreeResp {
+  int32          code     = 1;
+  string message = 2;
+  repeated DistrictTree data   = 3;
+}
+
+message DistrictTree {
   int64 id = 1;
   string parentAdCode = 2;
   string adCode = 3;
