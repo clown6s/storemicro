@@ -104,11 +104,11 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 
 	if phone != "" {
 		conditions = append(conditions, "phone LIKE ?")
-		args = append(args, phone+"%")
+		args = append(args, "%"+phone+"%")
 	}
 	if name != "" {
 		conditions = append(conditions, "real_name LIKE ?")
-		args = append(args, name+"%")
+		args = append(args, "%"+name+"%")
 	}
 
 	where := strings.Join(conditions, " AND ")
