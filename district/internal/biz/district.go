@@ -20,14 +20,15 @@ type District struct {
 	Children     []*District
 }
 
+// DistrictRepo 数据仓库接口
+type DistrictRepo interface {
+	Get(ctx context.Context, adCode string) ([]*District, error)
+	List(ctx context.Context, adCode string) ([]*District, error)
+}
+
 // DistrictUseCase 行政区用例
 type DistrictUseCase struct {
 	repo DistrictRepo
-}
-
-// DistrictRepo 数据仓库接口
-type DistrictRepo interface {
-	GetTree(ctx context.Context, adCode string) ([]*District, error)
 }
 
 // NewDistrictUseCase 创建行政区用例
@@ -35,7 +36,6 @@ func NewDistrictUseCase(repo DistrictRepo) *DistrictUseCase {
 	return &DistrictUseCase{repo: repo}
 }
 
-// GetTree 获取行政区树
-func (uc *DistrictUseCase) GetTree(ctx context.Context, adCode string) ([]*District, error) {
-	return uc.repo.GetTree(ctx, adCode)
+func (u *DistrictUseCase) Get(ctx context.Context, adCode string) ([]*District, error) {
+	return u.repo.Get(ctx, adCode)
 }

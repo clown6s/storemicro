@@ -24,47 +24,54 @@ func NewDistrictService(uc *biz.DistrictUseCase) *DistrictService {
 func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.GetProvinceTreeReq) (*districtv1.GetProvinceTreeResp, error) {
 	zap.L().Info("GetProvinceTree called", zap.String("adCode", req.AdCode))
 
-	// 调用 biz 层获取树形数据
-	districts, err := d.uc.GetTree(ctx, req.AdCode)
+	districts, err := d.uc.Get(ctx, req.AdCode)
 	if err != nil {
-		zap.L().Error("failed to get district tree", zap.Error(err))
-		return &districtv1.GetProvinceTreeResp{
-			Code:    500,
-			Message: err.Error(),
-		}, err
+		return nil, err
 	}
-
-	// 转换为 proto 类型
-	data := make([]*districtv1.DistrictTree, 0, len(districts))
-	for _, district := range districts {
-		data = append(data, convertDistrictToProto(district))
-	}
-
+	tree := BuildDistrictTree(districts)
 	return &districtv1.GetProvinceTreeResp{
 		Code:    200,
 		Message: "success",
-		Data:    data,
+		Data:    tree,
 	}, nil
 }
 
-// convertDistrictToProto 将 biz.District 转换为 proto DistrictTree
-func convertDistrictToProto(d *biz.District) *districtv1.DistrictTree {
-	if d == nil {
-		return nil
+func BuildDistrictTree(districts []*biz.District) []*districtv1.DistrictTree {
+	nodeMap := make(map[string]*districtv1.DistrictTree)
+
+	// 1. 先创建所有节点
+	for _, d := range districts {
+		nodeMap[d.AdCode] = &districtv1.DistrictTree{
+			Id:           d.ID,
+			ParentAdCode: d.ParentAdCode,
+			AdCode:       d.AdCode,
+			Name:         d.Name,
+			Level:        d.Level,
+			Center:       d.Center,
+			Children:     []*districtv1.DistrictTree{},
+		}
 	}
 
-	children := make([]*districtv1.DistrictTree, 0, len(d.Children))
-	for _, child := range d.Children {
-		children = append(children, convertDistrictToProto(child))
+	var roots []*districtv1.DistrictTree
+
+	// 2. 构建树
+	for _, node := range nodeMap {
+		// 没有父节点
+		if node.ParentAdCode == "100000" {
+			roots = append(roots, node)
+			continue
+		}
+
+		// 找父节点
+		parent, ok := nodeMap[node.ParentAdCode]
+		if !ok {
+			// 父节点不存在，作为根节点
+			roots = append(roots, node)
+			continue
+		}
+
+		parent.Children = append(parent.Children, node)
 	}
 
-	return &districtv1.DistrictTree{
-		Id:           d.ID,
-		ParentAdCode: d.ParentAdCode,
-		AdCode:       d.AdCode,
-		Name:         d.Name,
-		Level:        d.Level,
-		Center:       d.Center,
-		Children:     children,
-	}
+	return roots
 }
