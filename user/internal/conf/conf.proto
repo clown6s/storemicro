@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package conf;
+
+option go_package = "user/internal/conf;conf";
+
+import "google/protobuf/duration.proto";
+
+message Bootstrap {
+  Server server = 1;
+  Data data = 2;
+  Logger logger = 3;
+  Registry registry = 4;
+}
+
+message Server {
+  message GRPC {
+    string addr = 1;
+    google.protobuf.Duration timeout = 2;
+  }
+  GRPC grpc = 1;
+}
+
+message Data {
+  message Database {
+    string driver = 1;
+    string source = 2;
+  }
+  Database database = 1;
+}
+
+message Logger {
+  string level = 1;
+  string output = 2;
+  int32 max_size = 3;
+  int32 max_backups = 4;
+  int32 max_age = 5;
+  bool compress = 6;
+}
+
+message Registry {
+  message Etcd {
+    repeated string endpoints = 1;
+    int64 timeout = 2;
+  }
+  Etcd etcd = 1;
+}

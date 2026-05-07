@@ -1,0 +1,17 @@
+server:
+  grpc:
+    addr: 0.0.0.0:9002
+    timeout: 10s
+
+data:
+  database:
+    driver: mysql
+    source: root:admin@zzp@tcp(10.211.55.5:3306)/store_micro?charset=utf8mb4&parseTime=true&loc=Local
+
+logger:
+  level: info
+  output: ./logs/product.log
+  max_size: 100
+  max_backups: 5
+  max_age: 30
+  compress: true

@@ -1,0 +1,25 @@
+# IDE
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Go
+vendor/
+*.test
+*.out
+
+# Logs
+logs/
+*.log
+
+# Protoc generated (keep pb.go in repo, exclude intermediate)
+*.pb.bin

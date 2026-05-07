@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package api.product.v1;
+
+option go_package = "github.com/36111/kratos-services/product/api/product/v1;productv1";
+
+import "google/api/annotations.proto";
+
+service Product {
+  rpc GetProduct (GetProductReq) returns (GetProductResp) {
+    option (google.api.http) = {
+      get: "/api/v1/product/{id}"
+    };
+  }
+  rpc ListProducts (ListProductsReq) returns (ListProductsResp) {
+    option (google.api.http) = {
+      get: "/api/v1/product/list"
+    };
+  }
+}
+
+message GetProductReq {
+  int64 id = 1;
+}
+
+message GetProductResp {
+  int64 id = 1;
+  string name = 2;
+  string description = 3;
+  int64 price = 4; // 分为单位
+  int32 stock = 5;
+}
+
+message ListProductsReq {
+  int32 page = 1;
+  int32 page_size = 2;
+}
+
+message ListProductsResp {
+  repeated GetProductResp items = 1;
+  int32 total = 2;
+}
