@@ -1,4 +1,4 @@
-package main
+package resources
 
 import (
 	"fmt"
@@ -16,14 +16,18 @@ import (
 	routerv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/http/router/v3"
 	hcmv3 "github.com/envoyproxy/go-control-plane/envoy/extensions/filters/network/http_connection_manager/v3"
 	"github.com/envoyproxy/go-control-plane/pkg/wellknown"
+	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
+
+	"control-plane/internal/config"
+	"control-plane/internal/types"
 )
 
 // GenerateListeners 生成 LDS 资源（HTTP Listener）
-func GenerateListeners(cfg *Config) []proto.Message {
+func GenerateListeners(cfg *config.Config) []proto.Message {
 	hcm := &hcmv3.HttpConnectionManager{
 		StatPrefix: "ingress_http",
 		CodecType:  hcmv3.HttpConnectionManager_AUTO,
@@ -102,9 +106,9 @@ func GenerateListeners(cfg *Config) []proto.Message {
 }
 
 // GenerateRouteConfig 生成 RDS 资源（路由配置）
-func GenerateRouteConfig(cfg *Config) []proto.Message {
+func GenerateRouteConfig(cfg *config.Config) []proto.Message {
 	// 按路由前缀长度降序排列（长前缀优先匹配）
-	sorted := make([]ServiceConfig, len(cfg.Services))
+	sorted := make([]config.ServiceConfig, len(cfg.Services))
 	copy(sorted, cfg.Services)
 	sort.Slice(sorted, func(i, j int) bool {
 		return len(sorted[j].RoutePrefix) < len(sorted[i].RoutePrefix)
@@ -145,7 +149,7 @@ func GenerateRouteConfig(cfg *Config) []proto.Message {
 }
 
 // GenerateClustersAndEndpoints 根据 etcd 中的服务实例生成 CDS + EDS 资源
-func GenerateClustersAndEndpoints(cfg *Config, services map[string][]ServiceInstance) (clusters []proto.Message, endpoints []proto.Message) {
+func GenerateClustersAndEndpoints(cfg *config.Config, services map[string][]types.ServiceInstance) (clusters []proto.Message, endpoints []proto.Message) {
 	clusters = make([]proto.Message, 0, len(cfg.Services))
 	endpoints = make([]proto.Message, 0, len(cfg.Services))
 
@@ -186,7 +190,10 @@ func GenerateClustersAndEndpoints(cfg *Config, services map[string][]ServiceInst
 		for _, inst := range instances {
 			host, portStr, err := parseAddr(inst.Metadata.Addr)
 			if err != nil {
-				fmt.Printf("[resources] invalid addr %s for %s: %v\n", inst.Metadata.Addr, svcCfg.Name, err)
+				zap.L().Named("resources").Warn("invalid addr",
+					zap.String("addr", inst.Metadata.Addr),
+					zap.String("service", svcCfg.Name),
+					zap.Error(err))
 				continue
 			}
 			port, _ := strconv.Atoi(portStr)
@@ -255,7 +262,7 @@ func mustAny(msg proto.Message) *anypb.Any {
 	return any
 }
 
-func allServiceNames(cfg *Config) []string {
+func allServiceNames(cfg *config.Config) []string {
 	names := make([]string, 0, len(cfg.Services))
 	for _, svc := range cfg.Services {
 		names = append(names, svc.GrpcService)

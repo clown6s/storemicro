@@ -1,9 +1,11 @@
-package main
+package config
 
 import (
 	"fmt"
 	"os"
 
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 	"gopkg.in/yaml.v3"
 )
 
@@ -11,6 +13,7 @@ import (
 type Config struct {
 	Listener   ListenerConfig   `yaml:"listener"`
 	Transcoder TranscoderConfig `yaml:"transcoder"`
+	Log        LogConfig        `yaml:"log"`
 	Etcd       EtcdConfig       `yaml:"etcd"`
 	Ads        AdsConfig        `yaml:"ads"`
 	Services   []ServiceConfig  `yaml:"services"`
@@ -24,6 +27,14 @@ type ListenerConfig struct {
 // TranscoderConfig gRPC-JSON Transcoder 配置
 type TranscoderConfig struct {
 	ProtoDescriptor string `yaml:"proto_descriptor"`
+}
+
+// LogConfig 日志配置
+type LogConfig struct {
+	Level   string `yaml:"level"`    // debug, info, warn, error
+	File    string `yaml:"file"`     // 日志文件路径，空则仅 stdout
+	MaxAge  int    `yaml:"max_age"`  // 日志保留天数
+	MaxSize int    `yaml:"max_size"` // 单个日志文件最大 MB
 }
 
 // EtcdConfig etcd 连接配置
@@ -80,6 +91,45 @@ func LoadConfig(path string) (*Config, error) {
 	if cfg.Ads.Port == 0 {
 		cfg.Ads.Port = 18000
 	}
+	if cfg.Log.Level == "" {
+		cfg.Log.Level = "info"
+	}
+	if cfg.Log.MaxAge == 0 {
+		cfg.Log.MaxAge = 7
+	}
+	if cfg.Log.MaxSize == 0 {
+		cfg.Log.MaxSize = 100
+	}
 
 	return cfg, nil
+}
+
+// BuildLogger 根据配置构建 zap.Logger
+func BuildLogger(cfg LogConfig) (*zap.Logger, error) {
+	level, err := zapcore.ParseLevel(cfg.Level)
+	if err != nil {
+		return nil, fmt.Errorf("parse log level %q: %w", cfg.Level, err)
+	}
+
+	encoderCfg := zap.NewProductionEncoderConfig()
+	encoderCfg.TimeKey = "ts"
+	encoderCfg.EncodeTime = zapcore.ISO8601TimeEncoder
+	encoderCfg.EncodeLevel = zapcore.CapitalLevelEncoder
+	encoderCfg.EncodeDuration = zapcore.SecondsDurationEncoder
+	encoder := zapcore.NewJSONEncoder(encoderCfg)
+
+	cores := []zapcore.Core{
+		zapcore.NewCore(encoder, zapcore.AddSync(os.Stdout), level),
+	}
+
+	if cfg.File != "" {
+		f, err := os.OpenFile(cfg.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			return nil, fmt.Errorf("open log file %q: %w", cfg.File, err)
+		}
+		cores = append(cores, zapcore.NewCore(encoder, zapcore.AddSync(f), level))
+	}
+
+	core := zapcore.NewTee(cores...)
+	return zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel)), nil
 }

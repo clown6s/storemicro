@@ -1,7 +1,7 @@
 # xDS 控制平面配置
 # 加新服务只需在 services 下追加条目，无需改代码
 
-# 网关监听端口
+# HTTP Listener 配置
 listener:
   port: 8080
 
@@ -9,6 +9,13 @@ listener:
 # 注意：此路径是 Envoy 容器内的路径（由控制面写入 xDS 配置，Envoy 读取）
 transcoder:
   proto_descriptor: "/root/object/storemicro/gateway/descriptor.pb"
+
+# 日志配置
+log:
+  level: "info"           # debug | info | warn | error
+  file: ""                # 日志文件路径，空则仅输出到 stdout
+  max_age: 7              # 日志保留天数
+  max_size: 100           # 单个日志文件最大 MB
 
 # etcd 连接配置
 etcd:
