@@ -39,7 +39,6 @@ func NewProductUsecase(repo ProductRepo) *ProductUsecase {
 	return &ProductUsecase{repo: repo}
 }
 
-// Get 获取商品
 func (uc *ProductUsecase) Get(ctx context.Context, id int64) (*Product, error) {
 	if id <= 0 {
 		zap.L().Warn("validation failed", zap.String("method", "Get"), zap.String("reason", "invalid product id"))

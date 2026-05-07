@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"time"
 
-	"district/internal/biz"
 	"district/internal/conf"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -43,27 +42,4 @@ func NewData(c *conf.Data, logger log.Logger) (*Data, func(), error) {
 		_ = d.db.Close()
 	}
 	return d, cleanup, nil
-}
-
-// DistrictRepoImpl 实现 biz.DistrictRepo 接口
-type DistrictRepoImpl struct {
-	data *Data
-}
-
-// NewDistrictRepo 创建 DistrictRepo 实现
-func NewDistrictRepo(data *Data) biz.DistrictRepo {
-	return &DistrictRepoImpl{data: data}
-}
-
-// Get 实现 DistrictRepo.Get 接口
-func (r *DistrictRepoImpl) Get(ctx context.Context) (*biz.District, error) {
-	row := r.data.db.QueryRowContext(ctx,
-		"SELECT id, name, description, price, stock FROM products LIMIT 1",
-	)
-	var d biz.District
-	err := row.Scan(&d.ID, &d.Name, &d.Description, &d.Price, &d.Stock)
-	if err != nil {
-		return nil, err
-	}
-	return &d, nil
 }
