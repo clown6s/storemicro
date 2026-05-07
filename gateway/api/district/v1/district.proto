@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package api.district.v1;
+
+option go_package = "district/api/district/v1;districtv1";
+
+import "google/api/annotations.proto";
+
+service District {
+  rpc GetProvinceTree (GetProvinceTreeReq) returns (GetProvinceTreeResp) {
+    option (google.api.http) = {
+      get: "/api/v1/district/provinceTree"
+    };
+  }
+}
+
+message GetProvinceTreeReq {}
+
+message GetProvinceTreeResp {
+  int64 id = 1;
+  string parentAdCode = 2;
+  string adCode = 3;
+  string name = 4;
+  string level = 5;
+  string center = 6;
+  repeated GetProvinceTreeResp children = 7;
+}
