@@ -2,6 +2,78 @@
 
 基于 Kratos 框架的 gRPC 商品服务，提供商品的完整 CRUD 能力，通过 etcd 注册服务实例，供 gateway 发现调用。
 
+---
+
+## 生成步骤（重要：先看这里）
+
+### ⚠️ 各服务需要的生成文件不同
+
+| 服务 | 需要生成的文件 | 是否需要 --grpc-gateway_out |
+|------|---------------|------------------------------|
+| **product**（后端 gRPC 服务） | `*.pb.go` + `*_grpc.pb.go` | ❌ 不需要 |
+| **gateway**（HTTP 网关） | `*.pb.go` + `*_grpc.pb.go` + `*.pb.gw.go` | ✅ 必须加 |
+
+---
+
+### 第一步：生成 product 服务自身代码（在 product/ 目录下执行）
+
+```bash
+cd product
+
+protoc \
+  --proto_path=. \
+  --proto_path=./third_party \
+  --go_out=. --go_opt=paths=source_relative \
+  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+  api/product/v1/product.proto
+```
+
+生成后，`api/product/v1/` 下应有：
+- ✅ `product.pb.go`
+- ✅ `product_grpc.pb.go`
+- ❌ **不需要** `product.pb.gw.go`
+
+---
+
+### 第二步：复制 proto 到 gateway（如果需要对外暴露 HTTP 接口）
+
+```bash
+mkdir -p gateway/api/product/v1
+cp api/product/v1/product.proto gateway/api/product/v1/product.proto
+```
+
+---
+
+### 第三步：在 gateway 目录下生成完整代码（含 .pb.gw.go）
+
+```bash
+cd gateway
+
+protoc \
+  --proto_path=. \
+  --proto_path=./third_party \
+  --go_out=. --go_opt=paths=source_relative \
+  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+  --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
+  api/product/v1/product.proto
+```
+
+生成后，`gateway/api/product/v1/` 下应有：
+- ✅ `product.pb.go`
+- ✅ `product_grpc.pb.go`
+- ✅ `product.pb.gw.go` ← 只在 gateway 里生成
+
+---
+
+### 第四步：重新生成 Wire（修改了接口后才需要）
+
+```bash
+cd product/cmd/product
+wire
+```
+
+---
+
 ## 目录
 
 - [接口说明](#接口说明)
@@ -126,10 +198,9 @@ curl -X POST http://localhost:8080/api/v1/product/ping
 ```
 product/
 ├── api/product/v1/
-│   ├── product.proto            # 接口定义（源文件）
-│   ├── product.pb.go            # protobuf 消息结构（生成）
-│   ├── product_grpc.pb.go       # gRPC 服务端/客户端接口（生成）
-│   └── product.pb.gw.go         # grpc-gateway HTTP 路由（生成）
+│   ├── product.proto            # 接口定义（源文件，手动修改）
+│   ├── product.pb.go            # protobuf 消息结构（自动生成，勿手动修改）
+│   └── product_grpc.pb.go      # gRPC 服务端/客户端接口（自动生成，勿手动修改）
 │
 ├── cmd/product/
 │   ├── main.go                  # 程序入口：加载配置、连接 etcd、启动应用
@@ -269,14 +340,13 @@ message CreateProductResp {
 ### 第二步：重新生成 gRPC 代码
 
 ```bash
-# 在 product 目录下执行
+# 在 product 目录下执行（不需要 --grpc-gateway_out）
 protoc \
   --proto_path=. \
   --proto_path=./third_party \
   --go_out=. --go_opt=paths=source_relative \
   --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-  --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
-  api/product/v1/district.proto
+  api/product/v1/product.proto
 ```
 
 ### 第三步：biz 层已有 Create 方法，确认签名
@@ -426,14 +496,13 @@ go run ./cmd/product/... -conf configs/config.yaml
 # 编译
 go build -o bin/product ./cmd/product/...
 
-# 重新生成 proto
+# 重新生成 proto（product 服务，不需要 grpc-gateway）
 protoc \
   --proto_path=. \
   --proto_path=./third_party \
   --go_out=. --go_opt=paths=source_relative \
   --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-  --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
-  api/product/v1/district.proto
+  api/product/v1/product.proto
 
 # 重新生成配置结构
 protoc \

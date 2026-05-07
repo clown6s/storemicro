@@ -1,6 +1,6 @@
 # user — 用户服务
 
-基于 Kratos 框架的 gRPC 用户服务，提供用户的创建与查询能力，通过 etcd 注册服务实例，供 gateway 发现调用。
+基于 Kratos v2 框架的 gRPC 用户服务，提供用户注册、登录、查询、登出等能力，通过 etcd 注册服务实例，供 gateway 发现调用。
 
 ## 目录
 
@@ -10,26 +10,99 @@
 - [启动方式](#启动方式)
 - [数据库表结构](#数据库表结构)
 - [扩展：添加新接口（完整步骤）](#扩展添加新接口完整步骤)
-- [扩展：添加 gRPC 中间件](#扩展添加-grpc-中间件)
 - [常用命令](#常用命令)
+
+---
+
+## 生成步骤（重要：先看这里）
+
+### ⚠️ 各服务需要的生成文件不同
+
+| 服务 | 需要生成的文件 | 是否需要 --grpc-gateway_out |
+|------|---------------|------------------------------|
+| **user / product / district**（后端 gRPC 服务） | `*.pb.go` + `*_grpc.pb.go` | ❌ 不需要 |
+| **gateway**（HTTP 网关） | `*.pb.go` + `*_grpc.pb.go` + `*.pb.gw.go` | ✅ 必须加 |
+
+---
+
+### 第一步：生成 user 服务自身代码（在 user/ 目录下执行）
+
+```bash
+cd user
+
+protoc \
+  --proto_path=. \
+  --proto_path=./third_party \
+  --go_out=. --go_opt=paths=source_relative \
+  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+  api/user/v1/user.proto
+```
+
+生成后，`api/user/v1/` 下应有：
+- ✅ `user.pb.go`
+- ✅ `user_grpc.pb.go`
+- ❌ **不需要** `user.pb.gw.go`
+
+---
+
+### 第二步：复制 proto 到 gateway（如果需要对外暴露 HTTP 接口）
+
+```bash
+mkdir -p gateway/api/user/v1
+cp api/user/v1/user.proto gateway/api/user/v1/user.proto
+```
+
+---
+
+### 第三步：在 gateway 目录下生成完整代码（含 .pb.gw.go）
+
+```bash
+cd gateway
+
+protoc \
+  --proto_path=. \
+  --proto_path=./third_party \
+  --go_out=. --go_opt=paths=source_relative \
+  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+  --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
+  api/user/v1/user.proto
+```
+
+生成后，`gateway/api/user/v1/` 下应有：
+- ✅ `user.pb.go`
+- ✅ `user_grpc.pb.go`
+- ✅ `user.pb.gw.go` ← 只在 gateway 里生成
+
+---
+
+### 第四步：重新生成 Wire（修改了接口后才需要）
+
+```bash
+cd user/cmd/user
+wire
+```
 
 ---
 
 ## 接口说明
 
-服务名：`user`，gRPC 监听 `:9001`
+服务名：`storemicro-user`，gRPC 监听 `:9001`
 
-### CreateUser — 创建用户
+### Register — 用户注册
 
-**gRPC 方法**：`User/CreateUser`  
-**HTTP 路由（gateway 转发后）**：`POST /api/v1/user`
+**gRPC 方法**：`User/Register`  
+**HTTP 路由（gateway 转发后）**：`POST /api/v1/user/register`
 
 请求体：
 
 ```json
 {
-  "name": "张三",
-  "email": "zhangsan@example.com"
+  "phone": "13800138000",
+  "password": "123456",
+  "email": "test@example.com",
+  "realName": "张三",
+  "gender": 1,
+  "age": 25
 }
 ```
 
@@ -38,61 +111,151 @@
 ```json
 {
   "id": 1,
-  "message": "created"
+  "message": "registered"
 }
 ```
 
 **业务规则**：
-- `name` 不能为空
-- `email` 不能为空
-- `email` 必须在 `users` 表中唯一，重复注册返回 `ALREADY_EXISTS`
+- `phone` 不能为空，且全局唯一
+- `password` 不能为空，服务端用 bcrypt 加密存储
+- `email` 如果提供，必须全局唯一
 
-**错误码对照**：
+---
 
-| 场景 | gRPC 状态码 | HTTP 状态码 |
-|------|-------------|-------------|
-| 参数缺失 | `INVALID_ARGUMENT` | 400 |
-| 邮箱已存在 | `ALREADY_EXISTS` | 409 |
-| 服务内部错误 | `INTERNAL` | 500 |
+### Login — 用户登录
+
+**gRPC 方法**：`User/Login`  
+**HTTP 路由**：`POST /api/v1/user/login`
+
+请求体：
+
+```json
+{
+  "phone": "13800138000",
+  "password": "123456"
+}
+```
+
+响应体：
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+  "user": {
+    "id": 1,
+    "phone": "13800138000",
+    "realName": "张三",
+    "email": "test@example.com"
+  }
+}
+```
+
+**说明**：
+- 登录成功返回 JWT token，有效期 24 小时
+- 支持单设备登录：重复登录会使旧 token 失效
+- token 同时写入 Redis（`storemicro:token:{token}` → userID），gateway 层会校验
 
 ---
 
 ### GetUser — 查询用户
 
 **gRPC 方法**：`User/GetUser`  
-**HTTP 路由（gateway 转发后）**：`GET /api/v1/user/{id}`
-
-请求参数：路径中的 `{id}` 为用户 ID（字符串形式，服务内部转为 int64）
+**HTTP 路由**：`GET /api/v1/user/{id}`
 
 响应体：
 
 ```json
 {
-  "id": 1,
-  "name": "张三",
-  "email": "zhangsan@example.com"
+  "user": {
+    "id": 1,
+    "phone": "13800138000",
+    "realName": "张三",
+    "avatar": "",
+    "gender": 1,
+    "age": 25,
+    "email": "test@example.com",
+    "createTime": "2026-01-01 12:00:00",
+    "updateTime": "2026-01-01 12:00:00"
+  }
 }
 ```
 
-**错误码对照**：
+---
 
-| 场景 | gRPC 状态码 | HTTP 状态码 |
-|------|-------------|-------------|
-| ID 格式错误 | `INVALID_ARGUMENT` | 400 |
-| 用户不存在 | `NOT_FOUND` | 404 |
+### ListUsers — 用户列表（分页 + 动态搜索）
+
+**gRPC 方法**：`User/ListUsers`  
+**HTTP 路由**：`GET /api/v1/user/list`
+
+查询参数：
+
+| 参数 | 类型 | 说明 |
+|------|------|------|
+| `page` | int32 | 页码，默认 1 |
+| `pageSize` | int32 | 每页数量，默认 10，最大 100 |
+| `phone` | string | 可选，按手机号前缀模糊搜索 |
+| `name` | string | 可选，按真实姓名前缀模糊搜索 |
+
+请求示例：
+
+```bash
+curl "http://localhost:8080/api/v1/user/list?page=1&pageSize=10&phone=138"
+```
+
+响应体：
+
+```json
+{
+  "users": [
+    {
+      "id": 1,
+      "phone": "13800138000",
+      "realName": "张三",
+      "email": "test@example.com"
+    }
+  ],
+  "total": 1,
+  "page": 1,
+  "pageSize": 10
+}
+```
+
+---
+
+### Logout — 用户登出
+
+**gRPC 方法**：`User/Logout`  
+**HTTP 路由**：`POST /api/v1/user/logout`
+
+请求体：
+
+```json
+{
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+响应体：
+
+```json
+{
+  "message": "logged out"
+}
+```
+
+**说明**：
+- 从 Redis 删除 token 双映射（`storemicro:token:{token}` 和 `storemicro:user_token:{userID}`）
+- token 已不存在时视为已登出，不报错
+- 登出后该 token 在 gateway 层会被拒绝（401）
 
 ---
 
 ### Ping — 健康检查
 
 **gRPC 方法**：`User/Ping`  
-**HTTP 路由（gateway 转发后）**：`POST /api/v1/user/ping`
+**HTTP 路由**：`POST /api/v1/user/ping`
 
-响应体：
-
-```json
-{"message": "pong"}
-```
+响应体：`{"message": "pong"}`
 
 ---
 
@@ -107,29 +270,37 @@ user/
 │   └── user.pb.gw.go          # grpc-gateway HTTP 路由（生成）
 │
 ├── cmd/user/
-│   ├── main.go                # 程序入口：加载配置、连接 etcd、启动应用
-│   ├── wire.go                # Wire 注入声明（编译时忽略）
+│   ├── main.go                # 程序入口：加载配置、连接 etcd、初始化 tracing、启动应用
+│   ├── wire.go                # Wire 注入声明
 │   └── wire_gen.go            # Wire 生成的依赖注入代码（勿手动修改）
 │
 ├── internal/
 │   ├── biz/
-│   │   └── user.go            # 领域模型 User、UserRepo 接口、UserUsecase
+│   │   └── user.go            # 领域模型 User、UserRepo 接口、UserUsecase（含 Register/Login/Logout/ListUsers）
 │   ├── service/
-│   │   └── user.go            # gRPC 服务实现，调用 UserUsecase
+│   │   └── user.go            # gRPC 服务实现，调用 UserUsecase，错误码映射
 │   ├── data/
-│   │   ├── data.go            # MySQL 连接池初始化
-│   │   └── user.go            # UserRepo 的 MySQL 实现
+│   │   ├── data.go            # MySQL 连接池初始化、Redis 初始化
+│   │   ├── user.go            # UserRepo 的 MySQL 实现（含动态查询）
+│   │   └── jwt.go             # JWT 生成/解析
 │   ├── server/
-│   │   └── grpc.go            # Kratos gRPC 服务器，注册 UserServer
+│   │   └── grpc.go            # Kratos gRPC 服务器（tracing + logging 中间件）
 │   ├── conf/
 │   │   ├── conf.proto         # 配置结构定义
 │   │   └── conf.pb.go         # 配置结构（生成）
-│   └── pkg/log/
-│       └── zap.go             # zap logger 封装
+│   └── pkg/
+│       ├── redis/
+│       │   └── redis.go        # Redis 封装（token 双映射，支持单设备登录）
+│       ├── jwt/
+│       │   └── jwt.go          # JWT 工具封装
+│       ├── snowflake/
+│       │   └── snowflake.go    # 雪花算法 ID 生成（基于 etcd 自动分配 node_id）
+│       └── log/
+│           └── zap.go          # zap logger 封装
 │
 ├── configs/
 │   └── config.yaml            # 服务配置文件
-├── third_party/google/api/    # proto HTTP 注解依赖
+├── third_party/google/         # proto HTTP 注解依赖（含 protobuf/descriptor.proto）
 └── go.mod
 ```
 
@@ -139,10 +310,10 @@ user/
 service 层（service/user.go）
     ↓  参数转换、错误码映射
 biz 层（biz/user.go）
-    ↓  业务规则、邮箱唯一性检查
-data 层（data/user.go）
-    ↓  MySQL CRUD
-数据库（users 表）
+    ↓  业务规则、密码加密、token 管理
+data 层（data/user.go + data/jwt.go）
+    ↓  MySQL CRUD + Redis token 存储
+数据库（user 表）+ Redis
 ```
 
 ---
@@ -155,12 +326,12 @@ data 层（data/user.go）
 server:
   grpc:
     addr: 0.0.0.0:9001   # gRPC 监听地址
-    timeout: 10s          # 请求超时时间
+    timeout: 10s
 
 data:
   database:
     driver: mysql
-    source: root:password@tcp(10.211.55.5:3306)/store_micro?charset=utf8mb4&parseTime=true&loc=Local
+    source: root:admin@zzp@tcp(10.211.55.5:3306)/store_micro?charset=utf8mb4&parseTime=true&loc=Local
 
 logger:
   level: info             # debug | info | warn | error
@@ -168,8 +339,17 @@ logger:
 registry:
   etcd:
     endpoints:
-      - 10.211.55.5:2379  # etcd 地址
-    timeout: 10           # 连接超时（秒）
+      - 10.211.55.5:2379
+    timeout: 10
+
+jwt:
+  secret: "store-micro-jwt-secret-2026"
+  expire_hours: 24
+
+redis:
+  addr: 10.211.55.5:6379
+  password: "admin@zzp"
+  db: 0
 ```
 
 ---
@@ -180,23 +360,24 @@ registry:
 
 ```bash
 cd user
-go run ./cmd/user/... -conf configs/config.yaml
+go run ./cmd/user/ -conf configs/config.yaml
 ```
 
 ### 编译后运行
 
 ```bash
 cd user
-go build -o bin/user ./cmd/user/...
+go build -o bin/user ./cmd/user/
 ./bin/user -conf configs/config.yaml
 ```
 
-启动成功后可以看到类似日志：
+启动成功日志：
 
 ```
-INFO  service initializing  name=user grpc_addr=0.0.0.0:9001
+INFO  service initializing  name=storemicro-user  grpc_addr=0.0.0.0:9001
 INFO  etcd registry connected  endpoints=[10.211.55.5:2379]
-INFO  service started  name=user
+INFO  OTLP tracer initialized  service=storemicro-user endpoint=10.211.55.5:4317
+INFO  service started  name=storemicro-user
 ```
 
 ---
@@ -204,51 +385,60 @@ INFO  service started  name=user
 ## 数据库表结构
 
 ```sql
-CREATE TABLE users (
-    id         BIGINT       AUTO_INCREMENT PRIMARY KEY,
-    name       VARCHAR(64)  NOT NULL,
-    email      VARCHAR(128) NOT NULL UNIQUE,
-    created_at DATETIME     DEFAULT CURRENT_TIMESTAMP
+CREATE TABLE `user` (
+    id          BIGINT       NOT NULL PRIMARY KEY,
+    password    VARCHAR(255) NOT NULL,
+    real_name   VARCHAR(64)  DEFAULT '',
+    avatar      VARCHAR(255) DEFAULT '',
+    gender      INT          DEFAULT 0,
+    age         INT          DEFAULT 0,
+    phone       VARCHAR(20)  NOT NULL,
+    email       VARCHAR(128) DEFAULT '',
+    create_time DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    update_time DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    remark      VARCHAR(255) DEFAULT '',
+    deleted_at  DATETIME     DEFAULT NULL
 );
 ```
+
+> 注意：id 由雪花算法生成，不是 AUTO_INCREMENT。
 
 ---
 
 ## 扩展：添加新接口（完整步骤）
 
-以添加 **UpdateUser（更新用户）** 接口为例，演示完整的扩展流程。
+以添加 **UpdateUser** 接口为例：
 
 ### 第一步：修改 proto 文件
 
-编辑 `api/user/v1/user.proto`，添加新方法和消息定义：
+编辑 `api/user/v1/user.proto`，添加新方法和消息定义，并配置 HTTP 路由注解。
 
-```protobuf
-service User {
-  // ... 已有方法 ...
+### 第二步：重新生成代码
 
-  rpc UpdateUser (UpdateUserReq) returns (UpdateUserResp) {
-    option (google.api.http) = {
-      put: "/api/v1/user/{id}"
-      body: "*"
-    };
-  }
-}
-
-message UpdateUserReq {
-  string id    = 1;  // 路径参数
-  string name  = 2;  // 可选，为空则不更新
-  string email = 3;  // 可选，为空则不更新
-}
-
-message UpdateUserResp {
-  string message = 1;
-}
-```
-
-### 第二步：重新生成 gRPC 代码
+在 `user/` 目录下执行：
 
 ```bash
-# 在 user 目录下执行
+protoc \
+  --proto_path=. \
+  --proto_path=./third_party \
+  --go_out=. --go_opt=paths=source_relative \
+  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+  api/user/v1/user.proto
+```
+
+### 第三步：实现 biz 层
+
+在 `internal/biz/user.go` 中添加业务逻辑。
+
+### 第四步：实现 service 层
+
+在 `internal/service/user.go` 中实现 gRPC 方法，调用 biz 层并做错误码映射。
+
+### 第五步：同步到 gateway
+
+```bash
+cp api/user/v1/*.go ../../gateway/api/user/v1/
+cd ../../gateway
 protoc \
   --proto_path=. \
   --proto_path=./third_party \
@@ -258,94 +448,13 @@ protoc \
   api/user/v1/user.proto
 ```
 
-### 第三步：biz 层已有 Update 方法，确认接口签名
-
-`internal/biz/user.go` 中已有：
-
-```go
-type UserRepo interface {
-    // ...
-    Update(ctx context.Context, user *User) error
-}
-
-func (uc *UserUsecase) Update(ctx context.Context, user *User) error { ... }
-```
-
-若 biz 层尚无对应方法，在此文件中添加业务逻辑。
-
-### 第四步：data 层实现（已有，确认 SQL）
-
-`internal/data/user.go` 中 `Update` 方法已实现：使用 `COALESCE(NULLIF(?, ''), name)` 实现可选更新。
-
-### 第五步：在 service 层实现 gRPC 方法
-
-编辑 `internal/service/user.go`：
-
-```go
-func (s *UserService) UpdateUser(ctx context.Context, req *userv1.UpdateUserReq) (*userv1.UpdateUserResp, error) {
-    zap.L().Info("UpdateUser called", zap.String("id", req.Id))
-
-    id, err := strconv.ParseInt(req.Id, 10, 64)
-    if err != nil {
-        return nil, status.Errorf(codes.InvalidArgument, "invalid user id: %s", req.Id)
-    }
-
-    err = s.uc.Update(ctx, &biz.User{
-        ID:    id,
-        Name:  req.Name,
-        Email: req.Email,
-    })
-    if err != nil {
-        return nil, s.mapError(err)
-    }
-    return &userv1.UpdateUserResp{Message: "updated"}, nil
-}
-```
-
-同时在 `mapError` 中补充新的错误分支（如果有新错误类型）。
-
-### 第六步：将新接口同步到 gateway
-
-将更新后的 `api/user/v1/*.go` 文件同步到 `gateway/api/user/v1/`，然后重启 gateway。
+### 第六步：验证
 
 ```bash
-cp user/api/user/v1/*.go gateway/api/user/v1/
-```
-
-### 第七步：验证
-
-```bash
-curl -X PUT http://localhost:8080/api/v1/user/1 \
+curl -X POST http://localhost:8080/api/v1/user/xxx \
   -H "Content-Type: application/json" \
-  -d '{"name":"李四"}'
-```
-
----
-
-## 扩展：添加 gRPC 中间件
-
-编辑 `internal/server/grpc.go`：
-
-```go
-import (
-    "github.com/go-kratos/kratos/v2/middleware/ratelimit"
-    "github.com/go-kratos/kratos/v2/middleware/tracing"
-)
-
-func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.UserService) *grpc.Server {
-    opts := []grpc.ServerOption{
-        grpc.Address(c.Grpc.Addr),
-        grpc.Middleware(
-            recovery.Recovery(),          // panic 恢复
-            logging.Server(logger),       // 请求日志
-            ratelimit.Server(),           // 限流（新增）
-            tracing.Server(),             // 链路追踪（新增）
-        ),
-    }
-    srv := grpc.NewServer(opts...)
-    userv1.RegisterUserServer(srv, svc)
-    return srv
-}
+  -H "Authorization: Bearer {token}" \
+  -d '{...}'
 ```
 
 ---
@@ -354,18 +463,17 @@ func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.UserService) 
 
 ```bash
 # 运行
-go run ./cmd/user/... -conf configs/config.yaml
+go run ./cmd/user/ -conf configs/config.yaml
 
 # 编译
-go build -o bin/user ./cmd/user/...
+go build -o bin/user ./cmd/user/
 
-# 重新生成 proto
+# 重新生成 proto（user 服务，不需要 grpc-gateway）
 protoc \
   --proto_path=. \
   --proto_path=./third_party \
   --go_out=. --go_opt=paths=source_relative \
   --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-  --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
   api/user/v1/user.proto
 
 # 重新生成 Wire 依赖注入代码
@@ -376,5 +484,4 @@ go mod tidy
 
 # 运行测试
 go test ./...
-go test -v -cover ./internal/biz/...
 ```

@@ -1,17 +1,16 @@
 # storemicro — 微服务电商后端
 
-基于 **Go + Kratos + gRPC + etcd** 构建的微服务项目，包含 HTTP 网关、用户服务和商品服务三个模块。
+基于 **Go + Kratos v2 + gRPC + etcd** 构建的微服务项目，网关统一认证，内部服务专注业务。
 
 ## 目录
 
 - [架构概览](#架构概览)
+- [技术栈](#技术栈)
 - [项目结构](#项目结构)
 - [依赖环境](#依赖环境)
 - [快速启动](#快速启动)
-- [REST API 一览](#rest-api-一览)
 - [添加新服务（完整流程）](#添加新服务完整流程)
 - [常用命令速查](#常用命令速查)
-- [配置说明](#配置说明)
 
 ---
 
@@ -22,31 +21,54 @@ HTTP Client
     │
     │  REST HTTP :8080
     ▼
-┌─────────────────────────────────┐
-│           gateway               │
-│  grpc-gateway + etcd discovery  │
-└────────────┬──────────┬─────────┘
-             │ gRPC     │ gRPC
-    ┌────────▼──┐   ┌───▼────────┐
-    │   user    │   │  product   │
-    │  :9001    │   │   :9002    │
-    └────┬──────┘   └──────┬─────┘
-         │                 │
-         └────────┬────────┘
-                  │
-         ┌────────▼────────┐
-         │   MySQL         │
-         │  store_micro    │
-         └─────────────────┘
-
-所有服务均通过 etcd 进行服务注册与发现
+┌──────────────────────────────────────┐
+│              gateway (:8080)          │
+│  grpc-gateway + JWT 认证 + Redis     │
+│  OpenTelemetry HTTP/gRPC tracing     │
+└──────┬──────────┬──────────┬─────────┘
+       │ gRPC     │ gRPC     │ gRPC
+  ┌────▼───┐ ┌────▼────┐ ┌──▼────────┐
+  │  user  │ │ product │ │ district  │
+  │ :9001  │ │  :9002  │ │  :9003    │
+  └────┬───┘ └────┬────┘ └─────┬─────┘
+       │          │            │
+       └────┬─────┴─────┬──────┘
+            │           │
+     ┌──────▼──┐  ┌─────▼─────┐
+     │  MySQL  │  │   Redis   │
+     │store_micro│ │ token校验  │
+     └─────────┘  └───────────┘
+            │
+     ┌──────▼──────┐
+     │    etcd     │
+     │ 服务注册发现 │
+     └─────────────┘
 ```
 
 | 模块 | 职责 | 监听端口 | 协议 |
 |------|------|----------|------|
-| `gateway` | HTTP→gRPC 反向代理，对外暴露 REST 接口 | `:8080` | HTTP |
-| `user` | 用户 CRUD 业务服务 | `:9001` | gRPC |
+| `gateway` | HTTP→gRPC 反向代理，JWT 认证，Redis token 校验，链路追踪 | `:8080` | HTTP |
+| `user` | 用户注册/登录/登出/查询，Redis 单设备登录 | `:9001` | gRPC |
 | `product` | 商品 CRUD 业务服务 | `:9002` | gRPC |
+| `district` | 区域/地址业务服务 | `:9003` | gRPC |
+
+---
+
+## 技术栈
+
+| 组件 | 技术 | 说明 |
+|------|------|------|
+| 框架 | Kratos v2 | gRPC 服务框架，中间件链 |
+| 协议 | gRPC + Protobuf | 内部服务间通信 |
+| 网关 | grpc-gateway | REST JSON ↔ gRPC 自动转换 |
+| 服务发现 | etcd | 服务注册与发现，雪花算法 node_id 分配 |
+| 数据库 | MySQL | 数据持久化 |
+| 缓存 | Redis | token 双映射，单设备登录 |
+| 认证 | JWT (HS256) | 网关统一鉴权，白名单放行 |
+| ID 生成 | 雪花算法 | 基于 etcd 自动分配 node_id |
+| 链路追踪 | OpenTelemetry + OTLP gRPC → Jaeger | 全链路 trace_id 传递 |
+| 日志 | zap | 结构化日志，Kratos log 桥接 |
+| 依赖注入 | Wire | 编译时依赖注入 |
 
 ---
 
@@ -54,77 +76,77 @@ HTTP Client
 
 ```
 storemicro/
-├── gateway/                # HTTP 网关
-│   ├── api/                # 生成的 gRPC/HTTP 客户端代码（protobuf 产物）
-│   │   ├── product/v1/
-│   │   └── user/v1/
-│   ├── cmd/gateway/        # 程序入口
-│   │   ├── main.go         # 启动、信号处理
-│   │   ├── proxy.go        # GatewayProxy：gRPC 连接 + 路由注册
-│   │   ├── appconfig.go    # 配置加载（YAML）
-│   │   ├── logger.go       # zap 日志 + Kratos 桥接
-│   │   └── flag.go         # 命令行参数
-│   ├── configs/config.yaml # 配置文件
-│   ├── third_party/        # protobuf 依赖（google/api）
+├── pkg/tracing/            # 公共链路追踪包（独立 go module）
+│   ├── tracing.go          # OTLP gRPC exporter + TracerProvider 初始化
 │   └── go.mod
+│
+├── gateway/                # HTTP 网关
+│   ├── api/                # protobuf 生成代码
+│   │   ├── product/v1/
+│   │   ├── user/v1/
+│   │   └── district/v1/
+│   ├── cmd/gateway/
+│   │   ├── main.go         # 启动、tracing 初始化、信号处理
+│   │   ├── proxy.go        # GatewayProxy：etcd + gRPC + Redis 连接
+│   │   ├── registry.go     # services 注册表（新增服务加一行）
+│   │   ├── auth.go         # JWT 认证中间件 + Redis token 校验
+│   │   ├── appconfig.go    # 配置加载
+│   │   └── logger.go       # zap 日志
+│   ├── configs/config.yaml
+│   └── third_party/        # protobuf 依赖（google/api + google/protobuf）
 │
 ├── user/                   # 用户服务
-│   ├── api/user/v1/        # 生成的 gRPC 代码
-│   ├── cmd/user/           # 程序入口（main + wire + wire_gen）
+│   ├── api/user/v1/        # protobuf 生成代码
+│   ├── cmd/user/           # main + wire + wire_gen
 │   ├── internal/
-│   │   ├── biz/user.go     # 业务逻辑层（领域模型 + Usecase）
-│   │   ├── service/user.go # gRPC 服务层（协议转换）
-│   │   ├── data/           # 数据层（MySQL 操作）
-│   │   ├── server/grpc.go  # Kratos gRPC 服务器
+│   │   ├── biz/            # 领域模型 + Usecase
+│   │   ├── service/        # gRPC 服务实现
+│   │   ├── data/           # MySQL 实现 + Redis/JWT 封装
+│   │   ├── server/         # Kratos gRPC 服务器
 │   │   ├── conf/           # 配置结构（protobuf 生成）
-│   │   └── pkg/log/        # zap 日志封装
+│   │   └── pkg/            # snowflake, log, jwt, redis
 │   ├── configs/config.yaml
-│   ├── third_party/
-│   └── go.mod
+│   └── third_party/
 │
 ├── product/                # 商品服务（结构同 user）
-│   ├── api/product/v1/
-│   ├── cmd/product/
-│   ├── internal/
-│   │   ├── biz/product.go
-│   │   ├── service/product.go
-│   │   ├── data/
-│   │   ├── server/grpc.go
-│   │   ├── conf/
-│   │   └── pkg/log/
-│   ├── configs/config.yaml
-│   ├── third_party/
-│   └── go.mod
-│
-└── README.md               # 本文件
+├── district/               # 区域服务（结构同 user）
+└── README.md
 ```
 
-每个业务服务均遵循 **Kratos 三层架构**：
+### Kratos 三层架构
 
 ```
-HTTP/gRPC 请求
-    │
-service 层   ← 协议转换，参数校验，错误码映射
+service 层   ← gRPC 接口实现，参数转换，错误码映射
     │
 biz 层       ← 业务逻辑，领域规则，Usecase
     │
 data 层      ← 数据库操作，实现 biz 定义的 Repo 接口
 ```
 
+### 请求链路
+
+```
+Client → gateway(JWT认证) → gateway(grpc-gateway) → etcd(服务发现) → user/product(gRPC)
+                ↓                                          ↓
+         Redis(token校验)                           MySQL(数据存储)
+```
+
 ---
 
 ## 依赖环境
 
-| 工具 | 版本要求 | 用途 |
-|------|----------|------|
-| Go | >= 1.21 | 编译运行 |
-| protoc | >= 25.0 | 编译 `.proto` 文件 |
-| protoc-gen-go | latest | 生成 Go 代码 |
-| protoc-gen-go-grpc | latest | 生成 gRPC 代码 |
-| protoc-gen-grpc-gateway | latest | 生成 HTTP 网关代码 |
-| wire | latest | 依赖注入代码生成 |
-| etcd | >= 3.5 | 服务注册与发现 |
-| MySQL | >= 5.7 | 数据持久化 |
+| 工具 | 用途 |
+|------|------|
+| Go >= 1.21 | 编译运行 |
+| protoc | 编译 `.proto` 文件 |
+| protoc-gen-go | 生成 Go protobuf 代码 |
+| protoc-gen-go-grpc | 生成 gRPC 代码 |
+| protoc-gen-grpc-gateway | 生成 HTTP 网关代码（仅 gateway 需要） |
+| wire | 编译时依赖注入代码生成 |
+| etcd >= 3.5 | 服务注册与发现 |
+| MySQL >= 5.7 | 数据持久化 |
+| Redis | token 校验 |
+| Jaeger | 链路追踪（OTLP gRPC :4317，UI :16686） |
 
 **安装 protoc 插件**
 
@@ -135,247 +157,128 @@ go install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@lat
 go install github.com/google/wire/cmd/wire@latest
 ```
 
-**数据库初始化**
-
-```sql
-CREATE DATABASE store_micro DEFAULT CHARACTER SET utf8mb4;
-
-USE store_micro;
-
-CREATE TABLE users (
-    id    BIGINT AUTO_INCREMENT PRIMARY KEY,
-    name  VARCHAR(64)  NOT NULL,
-    email VARCHAR(128) NOT NULL UNIQUE,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE products (
-    id          BIGINT AUTO_INCREMENT PRIMARY KEY,
-    name        VARCHAR(128) NOT NULL,
-    description TEXT,
-    price       BIGINT  NOT NULL DEFAULT 0,  -- 单位：分
-    stock       INT     NOT NULL DEFAULT 0,
-    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
-);
-```
-
 ---
 
 ## 快速启动
 
-> 确保 etcd 和 MySQL 均已启动并可访问。
-
-### 1. 启动 user 服务
+> 确保 etcd、MySQL、Redis 均已启动并可访问。
 
 ```bash
-cd user
-go run ./cmd/user/... -conf configs/config.yaml
-```
+# 1. 启动 user 服务
+cd user && go run ./cmd/user/ -conf configs/config.yaml
 
-### 2. 启动 product 服务
+# 2. 启动 product 服务
+cd product && go run ./cmd/product/ -conf configs/config.yaml
 
-```bash
-cd product
-go run ./cmd/product/... -conf configs/config.yaml
-```
+# 3. 启动 district 服务
+cd district && go run ./cmd/district/ -conf configs/config.yaml
 
-### 3. 启动 gateway
+# 4. 启动 gateway（最后启动，依赖其他服务注册到 etcd）
+cd gateway && go run ./cmd/gateway/ -conf configs/config.yaml
 
-```bash
-cd gateway
-go run ./cmd/gateway/... -conf configs/config.yaml
-```
-
-### 4. 验证
-
-```bash
-# 健康检查
+# 5. 验证
 curl -X POST http://localhost:8080/api/v1/user/ping
 curl -X POST http://localhost:8080/api/v1/product/ping
-
-# 创建用户
-curl -X POST http://localhost:8080/api/v1/user \
-  -H "Content-Type: application/json" \
-  -d '{"name":"张三","email":"zhangsan@example.com"}'
-
-# 查询用户
-curl http://localhost:8080/api/v1/user/1
-
-# 查询商品列表
-curl "http://localhost:8080/api/v1/product/list?page=1&page_size=10"
 ```
-
----
-
-## REST API 一览
-
-### 用户服务
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `POST` | `/api/v1/user` | 创建用户 |
-| `GET` | `/api/v1/user/{id}` | 查询用户 |
-| `POST` | `/api/v1/user/ping` | 健康检查 |
-
-### 商品服务
-
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| `GET` | `/api/v1/product/{id}` | 查询商品 |
-| `GET` | `/api/v1/product/list` | 商品列表（支持分页） |
-| `POST` | `/api/v1/product/ping` | 健康检查 |
 
 ---
 
 ## 添加新服务（完整流程）
 
-以添加 `order`（订单）服务为例，完整演示从零到上线的所有步骤。
+以添加 `order`（订单）服务为例。
 
-### 步骤一：复制目录骨架
+### 1. 复制目录骨架
 
 ```bash
-# 以 product 为模板复制
 cp -r product order
 cd order
+# 修改 go.mod: module order
+# 修改 internal/ 下的包名引用: product → order
+# 修改 cmd/ 下的包名引用
 ```
 
-修改 `go.mod`，将模块名改为 `order`：
+### 2. 编写 Proto 文件
 
-```
-module order
-```
+编辑 `api/order/v1/order.proto`，定义 service + message，配置 `google.api.http` 注解。
 
-### 步骤二：编写 Proto 文件
-
-新建 `order/api/order/v1/order.proto`：
-
-```protobuf
-syntax = "proto3";
-
-package api.order.v1;
-
-option go_package = "order/api/order/v1;orderv1";
-
-import "google/api/annotations.proto";
-
-service Order {
-  rpc CreateOrder (CreateOrderReq) returns (CreateOrderResp) {
-    option (google.api.http) = {
-      post: "/api/v1/order"
-      body: "*"
-    };
-  }
-  rpc GetOrder (GetOrderReq) returns (GetOrderResp) {
-    option (google.api.http) = {
-      get: "/api/v1/order/{id}"
-    };
-  }
-  rpc Ping (PingReq) returns (PingResp) {
-    option (google.api.http) = {
-      post: "/api/v1/order/ping"
-      body: "*"
-    };
-  }
-}
-
-message PingReq {}
-message PingResp { string message = 1; }
-
-message CreateOrderReq {
-  int64 user_id    = 1;
-  int64 product_id = 2;
-  int32 quantity   = 3;
-}
-message CreateOrderResp {
-  int64  id      = 1;
-  string message = 2;
-}
-message GetOrderReq  { string id = 1; }
-message GetOrderResp {
-  int64 id         = 1;
-  int64 user_id    = 2;
-  int64 product_id = 3;
-  int32 quantity   = 4;
-  int64 amount     = 5;
-}
-```
-
-### 步骤三：生成 gRPC + HTTP 代码
+### 3. 生成代码
 
 ```bash
-# 在 order 目录下执行
+# 业务 proto
 protoc \
-  --proto_path=. \
-  --proto_path=./third_party \
+  --proto_path=. --proto_path=./third_party \
+  --go_out=. --go_opt=paths=source_relative \
+  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+  api/order/v1/order.proto
+
+# 配置 proto
+protoc \
+  --proto_path=. --proto_path=./third_party \
+  --go_out=. --go_opt=paths=source_relative \
+  internal/conf/conf.proto
+```
+
+### 4. 实现业务代码
+
+按 Kratos 三层结构依次实现：
+
+1. `internal/biz/order.go` — 领域模型 + Repo 接口 + Usecase
+2. `internal/data/order.go` — Repo 接口的 MySQL 实现
+3. `internal/service/order.go` — gRPC 服务实现
+4. `internal/server/grpc.go` — 注册 OrderServer
+5. 各层的 `ProviderSet` 加入新构造函数
+
+### 5. Wire 依赖注入
+
+编辑 `cmd/order/wire.go`，声明依赖关系，然后生成：
+
+```bash
+cd cmd/order && wire
+```
+
+### 6. 修改配置
+
+`configs/config.yaml` 中修改 gRPC 端口（避免冲突），添加 tracing endpoint。
+
+### 7. 接入 gateway
+
+**7.1** 复制 proto 文件到 gateway：
+
+```bash
+cp api/order/v1/order.proto ../gateway/api/order/v1/
+```
+
+**7.2** 在 gateway 目录生成代码：
+
+```bash
+cd ../gateway
+protoc \
+  --proto_path=. --proto_path=./third_party \
   --go_out=. --go_opt=paths=source_relative \
   --go-grpc_out=. --go-grpc_opt=paths=source_relative \
   --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
   api/order/v1/order.proto
 ```
 
-### 步骤四：实现业务代码
-
-按照 Kratos 三层结构依次实现：
-
-1. `internal/biz/order.go` — 定义领域模型 `Order` 和 `OrderRepo` 接口，实现 `OrderUsecase`
-2. `internal/data/order.go` — 实现 `OrderRepo` 接口，写 MySQL 操作
-3. `internal/service/order.go` — 实现 gRPC 服务，调用 `OrderUsecase`
-4. `internal/server/grpc.go` — 注册 `OrderServer`
-5. `cmd/order/wire.go` — 声明 Wire 注入关系
-
-### 步骤五：生成 Wire 依赖注入代码
-
-```bash
-cd order/cmd/order
-wire
-```
-
-### 步骤六：修改配置文件
-
-`order/configs/config.yaml` 中修改 gRPC 端口（如 `:9003`）：
-
-```yaml
-server:
-  grpc:
-    addr: 0.0.0.0:9003
-    timeout: 10s
-```
-
-### 步骤七：将新服务接入 gateway
-
-**7.1** 将生成的 `api/order/v1/*.go` 文件复制到 `gateway/api/order/v1/`
-
-**7.2** 在 `gateway/go.mod` 中添加引用（或直接复制文件）
-
-**7.3** 修改 `gateway/cmd/gateway/proxy.go`，添加 order 服务连接和路由注册：
+**7.3** 修改 `gateway/cmd/gateway/registry.go`，新增一行：
 
 ```go
-import orderv1 "gateway/api/order/v1"
-
-// 在 NewGatewayProxy 中添加：
-proxy.orderConn, err = grpc.NewClient("discovery:///order", dialOpts...)
-
-// 注册 order handler：
-if err := orderv1.RegisterOrderHandler(ctx, proxy.mux, proxy.orderConn); err != nil {
-    proxy.Close()
-    return nil, fmt.Errorf("failed to register order handler: %w", err)
+var services = []ServiceRegistration{
+    {Name: "user", RegisterHandler: userv1.RegisterUserHandler},
+    {Name: "product", RegisterHandler: productv1.RegisterProductHandler},
+    {Name: "order", RegisterHandler: orderv1.RegisterOrderHandler},  // 新增
 }
 ```
 
-**7.4** 同步更新 `GatewayProxy` 结构体和 `Close()` 方法。
+> 不需要改 `proxy.go`，它会自动循环 `services` 注册。
 
-### 步骤八：启动并验证
+**7.4** 如果 order 的 ping 不需要认证，在 `auth.go` 的 `noAuthPaths` 中添加白名单。
+
+### 8. 启动验证
 
 ```bash
-# 启动 order 服务
-cd order
-go run ./cmd/order/... -conf configs/config.yaml
-
-# 重启 gateway（加载新路由）
-cd gateway
-go run ./cmd/gateway/... -conf configs/config.yaml
-
-# 测试
+cd order && go run ./cmd/order/ -conf configs/config.yaml
+cd gateway && go run ./cmd/gateway/ -conf configs/config.yaml
 curl -X POST http://localhost:8080/api/v1/order/ping
 ```
 
@@ -383,38 +286,31 @@ curl -X POST http://localhost:8080/api/v1/order/ping
 
 ## 常用命令速查
 
-### 编译
+### 编译与运行
 
 ```bash
-# 编译单个服务（在对应服务目录执行）
-go build -o bin/user ./cmd/user/...
-go build -o bin/product ./cmd/product/...
-go build -o bin/gateway ./cmd/gateway/...
+go build -o bin/user ./cmd/user/           # 编译
+go run ./cmd/user/ -conf configs/config.yaml  # 运行
 ```
 
-### 运行（开发模式）
+### Proto 代码生成
 
 ```bash
-go run ./cmd/user/...    -conf configs/config.yaml
-go run ./cmd/product/... -conf configs/config.yaml
-go run ./cmd/gateway/... -conf configs/config.yaml
-```
+# 业务服务（user/product/district）
+protoc --proto_path=. --proto_path=./third_party \
+  --go_out=. --go_opt=paths=source_relative \
+  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+  api/user/v1/user.proto
 
-### protobuf 代码生成
-
-```bash
-# 在服务目录下执行，生成全部 proto
-protoc \
-  --proto_path=. \
-  --proto_path=./third_party \
+# gateway（需要额外生成 grpc-gateway）
+protoc --proto_path=. --proto_path=./third_party \
   --go_out=. --go_opt=paths=source_relative \
   --go-grpc_out=. --go-grpc_opt=paths=source_relative \
   --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
-  api/<service>/v1/<service>.proto
+  api/user/v1/user.proto
 
-# 生成配置结构（conf.proto）
-protoc \
-  --proto_path=. \
+# 配置结构
+protoc --proto_path=. --proto_path=./third_party \
   --go_out=. --go_opt=paths=source_relative \
   internal/conf/conf.proto
 ```
@@ -422,106 +318,46 @@ protoc \
 ### Wire 依赖注入
 
 ```bash
-# 在 cmd/<service> 目录下执行
-wire
-
-# 或指定目录
-wire ./cmd/user/...
+cd cmd/user && wire     # 在 cmd/<service> 目录下执行
 ```
 
 ### 依赖管理
 
 ```bash
-go mod tidy          # 整理依赖
-go mod download      # 下载依赖
-go mod vendor        # 导出 vendor 目录
+go mod tidy
+go mod download
 ```
 
-### 测试
+### etcd 调试
 
 ```bash
-go test ./...                    # 运行所有测试
-go test ./internal/biz/...       # 只测试 biz 层
-go test -v -run TestXxx ./...    # 运行指定测试
-go test -cover ./...             # 带覆盖率
-```
-
-### etcd 操作（调试用）
-
-```bash
-# 查看已注册的服务
 etcdctl --endpoints=10.211.55.5:2379 get / --prefix --keys-only
-
-# 查看具体服务信息
-etcdctl --endpoints=10.211.55.5:2379 get /microservices/user --prefix
 ```
+
+### Jaeger 链路追踪
+
+- OTLP gRPC: `10.211.55.5:4317`
+- Jaeger UI: `http://10.211.55.5:16686`
+- 服务名: `storemicro-gateway`、`storemicro-user`、`storemicro-product`
 
 ---
 
-## 配置说明
+## 关键设计
 
-### 业务服务（user / product）配置
+### 网关统一认证
 
-```yaml
-server:
-  grpc:
-    addr: 0.0.0.0:9001   # gRPC 监听地址
-    timeout: 10s          # 请求超时
+- JWT 签名校验 + Redis token 存在性校验
+- 白名单路径（register/login/ping）免认证
+- 内部 gRPC 服务不重复鉴权，信任 gateway 转发
 
-data:
-  database:
-    driver: mysql
-    source: root:password@tcp(host:3306)/store_micro?charset=utf8mb4&parseTime=true&loc=Local
+### 单设备登录
 
-logger:
-  level: info             # debug | info | warn | error
+- Redis 双映射：`storemicro:token:{token} → userID` + `storemicro:user_token:{userID} → token`
+- 重复登录时删除旧 token，新 token 生效
+- 被踢的旧 token 在 gateway 层被 Redis 校验拦截返回 401
 
-registry:
-  etcd:
-    endpoints:
-      - 10.211.55.5:2379
-    timeout: 10           # 连接超时（秒）
-```
+### 雪花算法 ID
 
-### gateway 配置
-
-```yaml
-name: storemicro
-version: v1
-
-server:
-  addr: :8080             # HTTP 监听地址
-
-etcd:
-  endpoints:
-    - 10.211.55.5:2379
-  dial_timeout: 5s
-
-log:
-  level: info
-```
-
----
-
-## 分层说明
-
-```
-┌──────────────────────────────────────┐
-│  service 层                          │
-│  - 实现 gRPC Server 接口             │
-│  - 参数类型转换（proto ↔ domain）    │
-│  - gRPC 错误码映射（mapError）       │
-├──────────────────────────────────────┤
-│  biz 层                              │
-│  - 领域模型定义（struct）            │
-│  - Repo 接口声明                     │
-│  - 业务规则 / 参数校验               │
-├──────────────────────────────────────┤
-│  data 层                             │
-│  - 实现 biz.Repo 接口               │
-│  - 执行 SQL 操作                     │
-│  - 连接池管理                        │
-└──────────────────────────────────────┘
-```
-
-扩展业务时，**只需在 biz 层定义规则、在 data 层实现存储、在 service 层暴露接口**，三层互相隔离，便于单独测试和替换。
+- 基于 etcd 分布式锁自动分配 node_id
+- 租约续约保活，实例下线自动释放
+- 无需配置文件指定 node_id
