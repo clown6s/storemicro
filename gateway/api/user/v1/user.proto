@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package api.user.v1;
+
+option go_package = "gateway/api/user/v1;userv1";
+
+import "google/api/annotations.proto";
+
+service User {
+  rpc GetUser (GetUserReq) returns (GetUserResp) {
+    option (google.api.http) = {
+      get: "/api/v1/user/{id}"
+    };
+  }
+  rpc CreateUser (CreateUserReq) returns (CreateUserResp) {
+    option (google.api.http) = {
+      post: "/api/v1/user"
+      body: "*"
+    };
+  }
+  rpc Ping (PingReq) returns (PingResp) {
+    option (google.api.http) = {
+      post: "/api/v1/user/ping"
+      body: "*"
+    };
+  }
+}
+
+message PingReq {}
+
+message PingResp {
+  string message = 1;
+}
+
+message GetUserReq {
+  string id = 1;
+}
+
+message GetUserResp {
+  int64 id = 1;
+  string name = 2;
+  string email = 3;
+}
+
+message CreateUserReq {
+  string name = 1;
+  string email = 2;
+}
+
+message CreateUserResp {
+  int64 id = 1;
+  string message = 2;
+}

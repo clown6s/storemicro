@@ -7,24 +7,19 @@ import (
 
 	"product/internal/biz"
 
-	"github.com/go-kratos/kratos/v2/log"
+	"go.uber.org/zap"
 )
 
 type productRepo struct {
-	data   *Data
-	logger log.Logger
+	data *Data
 }
 
-func NewProductRepo(data *Data, logger log.Logger) biz.ProductRepo {
-	return &productRepo{
-		data:   data,
-		logger: logger,
-	}
+func NewProductRepo(data *Data) biz.ProductRepo {
+	return &productRepo{data: data}
 }
 
 func (r *productRepo) Get(ctx context.Context, id int64) (*biz.Product, error) {
-	_log := log.NewHelper(r.logger)
-	_log.Debugw("msg", "productRepo.Get", "id", id)
+	zap.L().Debug("productRepo.Get", zap.Int64("id", id))
 
 	row := r.data.db.QueryRowContext(ctx,
 		"SELECT id, name, description, price, stock FROM products WHERE id = ?", id,
@@ -33,9 +28,9 @@ func (r *productRepo) Get(ctx context.Context, id int64) (*biz.Product, error) {
 	err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.Stock)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			_log.Warnw("msg", "productRepo.Get not found", "id", id)
+			zap.L().Warn("productRepo.Get not found", zap.Int64("id", id))
 		} else {
-			_log.Errorw("msg", "productRepo.Get failed", "id", id, "error", err)
+			zap.L().Error("productRepo.Get failed", zap.Int64("id", id), zap.Error(err))
 		}
 		return nil, errors.New("product not found")
 	}
@@ -43,15 +38,14 @@ func (r *productRepo) Get(ctx context.Context, id int64) (*biz.Product, error) {
 }
 
 func (r *productRepo) List(ctx context.Context, page, pageSize int32) ([]*biz.Product, int32, error) {
-	_log := log.NewHelper(r.logger)
-	_log.Debugw("msg", "productRepo.List", "page", page, "page_size", pageSize)
+	zap.L().Debug("productRepo.List", zap.Int32("page", page), zap.Int32("page_size", pageSize))
 
 	var total int32
 	err := r.data.db.QueryRowContext(ctx,
 		"SELECT COUNT(*) FROM products",
 	).Scan(&total)
 	if err != nil {
-		_log.Errorw("msg", "productRepo.List count failed", "error", err)
+		zap.L().Error("productRepo.List count failed", zap.Error(err))
 		return nil, 0, err
 	}
 
@@ -61,7 +55,7 @@ func (r *productRepo) List(ctx context.Context, page, pageSize int32) ([]*biz.Pr
 		pageSize, offset,
 	)
 	if err != nil {
-		_log.Errorw("msg", "productRepo.List query failed", "error", err)
+		zap.L().Error("productRepo.List query failed", zap.Error(err))
 		return nil, 0, err
 	}
 	defer rows.Close()
@@ -70,7 +64,7 @@ func (r *productRepo) List(ctx context.Context, page, pageSize int32) ([]*biz.Pr
 	for rows.Next() {
 		p := &biz.Product{}
 		if err := rows.Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.Stock); err != nil {
-			_log.Errorw("msg", "productRepo.List scan failed", "error", err)
+			zap.L().Error("productRepo.List scan failed", zap.Error(err))
 			return nil, 0, err
 		}
 		items = append(items, p)
@@ -79,53 +73,50 @@ func (r *productRepo) List(ctx context.Context, page, pageSize int32) ([]*biz.Pr
 }
 
 func (r *productRepo) Create(ctx context.Context, p *biz.Product) (int64, error) {
-	_log := log.NewHelper(r.logger)
-	_log.Debugw("msg", "productRepo.Create", "name", p.Name)
+	zap.L().Debug("productRepo.Create", zap.String("name", p.Name))
 
 	result, err := r.data.db.ExecContext(ctx,
 		"INSERT INTO products (name, description, price, stock) VALUES (?, ?, ?, ?)",
 		p.Name, p.Description, p.Price, p.Stock,
 	)
 	if err != nil {
-		_log.Errorw("msg", "productRepo.Create failed", "error", err)
+		zap.L().Error("productRepo.Create failed", zap.Error(err))
 		return 0, err
 	}
 
 	id, _ := result.LastInsertId()
-	_log.Infow("msg", "productRepo.Create success", "id", id)
+	zap.L().Info("productRepo.Create success", zap.Int64("id", id))
 	return id, nil
 }
 
 func (r *productRepo) Update(ctx context.Context, p *biz.Product) error {
-	_log := log.NewHelper(r.logger)
-	_log.Debugw("msg", "productRepo.Update", "id", p.ID)
+	zap.L().Debug("productRepo.Update", zap.Int64("id", p.ID))
 
 	result, err := r.data.db.ExecContext(ctx,
 		"UPDATE products SET name = COALESCE(NULLIF(?, ''), name), description = COALESCE(NULLIF(?, ''), description), price = COALESCE(NULLIF(?, 0), price), stock = COALESCE(NULLIF(?, 0), stock) WHERE id = ?",
 		p.Name, p.Description, p.Price, p.Stock, p.ID,
 	)
 	if err != nil {
-		_log.Errorw("msg", "productRepo.Update failed", "id", p.ID, "error", err)
+		zap.L().Error("productRepo.Update failed", zap.Int64("id", p.ID), zap.Error(err))
 		return err
 	}
 
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
-		_log.Warnw("msg", "productRepo.Update no rows affected", "id", p.ID)
+		zap.L().Warn("productRepo.Update no rows affected", zap.Int64("id", p.ID))
 	}
 	return nil
 }
 
 func (r *productRepo) Delete(ctx context.Context, id int64) error {
-	_log := log.NewHelper(r.logger)
-	_log.Debugw("msg", "productRepo.Delete", "id", id)
+	zap.L().Debug("productRepo.Delete", zap.Int64("id", id))
 
 	_, err := r.data.db.ExecContext(ctx, "DELETE FROM products WHERE id = ?", id)
 	if err != nil {
-		_log.Errorw("msg", "productRepo.Delete failed", "id", id, "error", err)
+		zap.L().Error("productRepo.Delete failed", zap.Int64("id", id), zap.Error(err))
 		return err
 	}
 
-	_log.Infow("msg", "productRepo.Delete success", "id", id)
+	zap.L().Info("productRepo.Delete success", zap.Int64("id", id))
 	return nil
 }

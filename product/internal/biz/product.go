@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/wire"
+	"go.uber.org/zap"
 )
 
 // ProviderSet is biz providers.
@@ -31,21 +31,18 @@ type ProductRepo interface {
 
 // ProductUsecase 商品用例
 type ProductUsecase struct {
-	repo   ProductRepo
-	logger log.Logger
+	repo ProductRepo
 }
 
 // NewProductUsecase 创建商品用例
-func NewProductUsecase(repo ProductRepo, logger log.Logger) *ProductUsecase {
-	return &ProductUsecase{repo: repo, logger: logger}
+func NewProductUsecase(repo ProductRepo) *ProductUsecase {
+	return &ProductUsecase{repo: repo}
 }
 
 // Get 获取商品
 func (uc *ProductUsecase) Get(ctx context.Context, id int64) (*Product, error) {
-	_log := log.NewHelper(uc.logger)
-
 	if id <= 0 {
-		_log.Warnw("msg", "validation failed", "method", "Get", "reason", "invalid product id")
+		zap.L().Warn("validation failed", zap.String("method", "Get"), zap.String("reason", "invalid product id"))
 		return nil, errors.New("invalid product id")
 	}
 	return uc.repo.Get(ctx, id)
@@ -53,8 +50,6 @@ func (uc *ProductUsecase) Get(ctx context.Context, id int64) (*Product, error) {
 
 // List 列出商品
 func (uc *ProductUsecase) List(ctx context.Context, page, pageSize int32) ([]*Product, int32, error) {
-	_log := log.NewHelper(uc.logger)
-
 	if page <= 0 {
 		page = 1
 	}
@@ -62,10 +57,10 @@ func (uc *ProductUsecase) List(ctx context.Context, page, pageSize int32) ([]*Pr
 		pageSize = 10
 	}
 
-	_log.Debugw("msg", "list products", "page", page, "page_size", pageSize)
+	zap.L().Debug("list products", zap.Int32("page", page), zap.Int32("page_size", pageSize))
 	items, total, err := uc.repo.List(ctx, page, pageSize)
 	if err != nil {
-		_log.Errorw("msg", "list products failed", "error", err)
+		zap.L().Error("list products failed", zap.Error(err))
 		return nil, 0, err
 	}
 	return items, total, nil
@@ -73,66 +68,60 @@ func (uc *ProductUsecase) List(ctx context.Context, page, pageSize int32) ([]*Pr
 
 // Create 创建商品
 func (uc *ProductUsecase) Create(ctx context.Context, p *Product) (*Product, error) {
-	_log := log.NewHelper(uc.logger)
-
 	if p.Name == "" {
-		_log.Warnw("msg", "validation failed", "method", "Create", "reason", "product name is required")
+		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "product name is required"))
 		return nil, errors.New("product name is required")
 	}
 	if p.Price < 0 {
-		_log.Warnw("msg", "validation failed", "method", "Create", "reason", "price must be non-negative")
+		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "price must be non-negative"))
 		return nil, errors.New("price must be non-negative")
 	}
 	if p.Stock < 0 {
-		_log.Warnw("msg", "validation failed", "method", "Create", "reason", "stock must be non-negative")
+		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "stock must be non-negative"))
 		return nil, errors.New("stock must be non-negative")
 	}
 
 	id, err := uc.repo.Create(ctx, p)
 	if err != nil {
-		_log.Errorw("msg", "create product failed", "error", err)
+		zap.L().Error("create product failed", zap.Error(err))
 		return nil, err
 	}
 
 	p.ID = id
-	_log.Infow("msg", "product created", "id", id, "name", p.Name)
+	zap.L().Info("product created", zap.Int64("id", id), zap.String("name", p.Name))
 	return p, nil
 }
 
 // Update 更新商品
 func (uc *ProductUsecase) Update(ctx context.Context, p *Product) error {
-	_log := log.NewHelper(uc.logger)
-
 	if p.ID <= 0 {
-		_log.Warnw("msg", "validation failed", "method", "Update", "reason", "invalid product id")
+		zap.L().Warn("validation failed", zap.String("method", "Update"), zap.String("reason", "invalid product id"))
 		return errors.New("invalid product id")
 	}
 
 	err := uc.repo.Update(ctx, p)
 	if err != nil {
-		_log.Errorw("msg", "update product failed", "id", p.ID, "error", err)
+		zap.L().Error("update product failed", zap.Int64("id", p.ID), zap.Error(err))
 		return err
 	}
 
-	_log.Infow("msg", "product updated", "id", p.ID)
+	zap.L().Info("product updated", zap.Int64("id", p.ID))
 	return nil
 }
 
 // Delete 删除商品
 func (uc *ProductUsecase) Delete(ctx context.Context, id int64) error {
-	_log := log.NewHelper(uc.logger)
-
 	if id <= 0 {
-		_log.Warnw("msg", "validation failed", "method", "Delete", "reason", "invalid product id")
+		zap.L().Warn("validation failed", zap.String("method", "Delete"), zap.String("reason", "invalid product id"))
 		return errors.New("invalid product id")
 	}
 
 	err := uc.repo.Delete(ctx, id)
 	if err != nil {
-		_log.Errorw("msg", "delete product failed", "id", id, "error", err)
+		zap.L().Error("delete product failed", zap.Int64("id", id), zap.Error(err))
 		return err
 	}
 
-	_log.Infow("msg", "product deleted", "id", id)
+	zap.L().Info("product deleted", zap.Int64("id", id))
 	return nil
 }

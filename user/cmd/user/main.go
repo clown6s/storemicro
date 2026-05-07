@@ -47,8 +47,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 初始化 zap logger
-	zapLogger := zaplog.NewZapLogger(bc.Logger)
+	// 初始化 zap logger（仅控制台输出）
+	zapLogger := zaplog.NewZapLogger(bc.Logger.Level)
 	log.SetLogger(zapLogger)
 
 	helper := log.NewHelper(zapLogger)
@@ -57,7 +57,6 @@ func main() {
 		"conf", confPath,
 		"grpc_addr", bc.Server.Grpc.Addr,
 		"log_level", bc.Logger.Level,
-		"log_output", bc.Logger.Output,
 	)
 
 	// 创建 etcd client 和 registrar

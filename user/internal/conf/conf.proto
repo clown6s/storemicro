@@ -31,11 +31,6 @@ message Data {
 
 message Logger {
   string level = 1;
-  string output = 2;
-  int32 max_size = 3;
-  int32 max_backups = 4;
-  int32 max_age = 5;
-  bool compress = 6;
 }
 
 message Registry {

@@ -18,10 +18,22 @@ service User {
       body: "*"
     };
   }
+  rpc Ping (PingReq) returns (PingResp) {
+    option (google.api.http) = {
+      post: "/api/v1/user/ping"
+      body: "*"
+    };
+  }
+}
+
+message PingReq {}
+
+message PingResp {
+  string message = 1;
 }
 
 message GetUserReq {
-  int64 id = 1;
+  string id = 1;
 }
 
 message GetUserResp {

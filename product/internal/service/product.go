@@ -2,12 +2,13 @@ package service
 
 import (
 	"context"
+	"strconv"
 
 	productv1 "product/api/product/v1"
 	"product/internal/biz"
 
-	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/wire"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -17,34 +18,37 @@ var ProviderSet = wire.NewSet(NewProductService)
 
 type ProductService struct {
 	productv1.UnimplementedProductServer
-	uc     *biz.ProductUsecase
-	logger log.Logger
+	uc *biz.ProductUsecase
 }
 
 // NewProductService 创建商品 gRPC 服务
-func NewProductService(uc *biz.ProductUsecase, logger log.Logger) *ProductService {
-	return &ProductService{uc: uc, logger: logger}
+func NewProductService(uc *biz.ProductUsecase) *ProductService {
+	return &ProductService{uc: uc}
 }
 
 func (s *ProductService) GetProduct(ctx context.Context, req *productv1.GetProductReq) (*productv1.GetProductResp, error) {
-	_log := log.NewHelper(s.logger)
-	_log.Infow("msg", "GetProduct called", "id", req.Id)
+	zap.L().Info("GetProduct called", zap.String("id", req.Id))
 
-	p, err := s.uc.Get(ctx, req.Id)
+	id, err := strconv.ParseInt(req.Id, 10, 64)
 	if err != nil {
-		_log.Warnw("msg", "GetProduct failed", "id", req.Id, "error", err)
+		zap.L().Warn("invalid product id", zap.String("id", req.Id), zap.Error(err))
+		return nil, status.Errorf(codes.InvalidArgument, "invalid product id: %s", req.Id)
+	}
+
+	p, err := s.uc.Get(ctx, id)
+	if err != nil {
+		zap.L().Warn("GetProduct failed", zap.Int64("id", id), zap.Error(err))
 		return nil, s.mapError(err)
 	}
 	return toProductResp(p), nil
 }
 
 func (s *ProductService) ListProducts(ctx context.Context, req *productv1.ListProductsReq) (*productv1.ListProductsResp, error) {
-	_log := log.NewHelper(s.logger)
-	_log.Infow("msg", "ListProducts called", "page", req.Page, "page_size", req.PageSize)
+	zap.L().Info("ListProducts called", zap.Int32("page", req.Page), zap.Int32("page_size", req.PageSize))
 
 	items, total, err := s.uc.List(ctx, req.Page, req.PageSize)
 	if err != nil {
-		_log.Warnw("msg", "ListProducts failed", "error", err)
+		zap.L().Warn("ListProducts failed", zap.Error(err))
 		return nil, s.mapError(err)
 	}
 	resps := make([]*productv1.GetProductResp, 0, len(items))
@@ -55,6 +59,10 @@ func (s *ProductService) ListProducts(ctx context.Context, req *productv1.ListPr
 		Items: resps,
 		Total: total,
 	}, nil
+}
+
+func (s *ProductService) Ping(ctx context.Context, req *productv1.PingReq) (*productv1.PingResp, error) {
+	return &productv1.PingResp{Message: "pong"}, nil
 }
 
 func toProductResp(p *biz.Product) *productv1.GetProductResp {

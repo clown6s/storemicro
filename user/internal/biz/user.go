@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/go-kratos/kratos/v2/log"
 	"github.com/google/wire"
+	"go.uber.org/zap"
 )
 
 // ProviderSet is biz providers.
@@ -29,56 +29,51 @@ type UserRepo interface {
 
 // UserUsecase 用户用例
 type UserUsecase struct {
-	repo   UserRepo
-	logger log.Logger
+	repo UserRepo
 }
 
 // NewUserUsecase 创建用户用例
-func NewUserUsecase(repo UserRepo, logger log.Logger) *UserUsecase {
-	return &UserUsecase{repo: repo, logger: logger}
+func NewUserUsecase(repo UserRepo) *UserUsecase {
+	return &UserUsecase{repo: repo}
 }
 
 // Create 创建用户
 func (uc *UserUsecase) Create(ctx context.Context, name, email string) (*User, error) {
-	_log := log.NewHelper(uc.logger)
-
 	if name == "" {
-		_log.Warnw("msg", "validation failed", "method", "Create", "reason", "name is required")
+		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "name is required"))
 		return nil, errors.New("name is required")
 	}
 	if email == "" {
-		_log.Warnw("msg", "validation failed", "method", "Create", "reason", "email is required")
+		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "email is required"))
 		return nil, errors.New("email is required")
 	}
 
 	exists, err := uc.repo.EmailExists(ctx, email)
 	if err != nil {
-		_log.Errorw("msg", "check email failed", "email", email, "error", err)
+		zap.L().Error("check email failed", zap.String("email", email), zap.Error(err))
 		return nil, err
 	}
 	if exists {
-		_log.Warnw("msg", "email already exists", "email", email)
+		zap.L().Warn("email already exists", zap.String("email", email))
 		return nil, errors.New("email already exists")
 	}
 
 	user := &User{Name: name, Email: email}
 	id, err := uc.repo.Create(ctx, user)
 	if err != nil {
-		_log.Errorw("msg", "create user failed", "error", err)
+		zap.L().Error("create user failed", zap.Error(err))
 		return nil, err
 	}
 
 	user.ID = id
-	_log.Infow("msg", "user created", "id", id, "name", name, "email", email)
+	zap.L().Info("user created", zap.Int64("id", id), zap.String("name", name), zap.String("email", email))
 	return user, nil
 }
 
 // Get 获取用户
 func (uc *UserUsecase) Get(ctx context.Context, id int64) (*User, error) {
-	_log := log.NewHelper(uc.logger)
-
 	if id <= 0 {
-		_log.Warnw("msg", "validation failed", "method", "Get", "reason", "invalid user id")
+		zap.L().Warn("validation failed", zap.String("method", "Get"), zap.String("reason", "invalid user id"))
 		return nil, errors.New("invalid user id")
 	}
 	return uc.repo.Get(ctx, id)
@@ -86,42 +81,38 @@ func (uc *UserUsecase) Get(ctx context.Context, id int64) (*User, error) {
 
 // Update 更新用户
 func (uc *UserUsecase) Update(ctx context.Context, user *User) error {
-	_log := log.NewHelper(uc.logger)
-
 	if user.ID <= 0 {
-		_log.Warnw("msg", "validation failed", "method", "Update", "reason", "invalid user id")
+		zap.L().Warn("validation failed", zap.String("method", "Update"), zap.String("reason", "invalid user id"))
 		return errors.New("invalid user id")
 	}
 	if user.Name == "" && user.Email == "" {
-		_log.Warnw("msg", "validation failed", "method", "Update", "reason", "nothing to update")
+		zap.L().Warn("validation failed", zap.String("method", "Update"), zap.String("reason", "nothing to update"))
 		return errors.New("nothing to update")
 	}
 
 	err := uc.repo.Update(ctx, user)
 	if err != nil {
-		_log.Errorw("msg", "update user failed", "id", user.ID, "error", err)
+		zap.L().Error("update user failed", zap.Int64("id", user.ID), zap.Error(err))
 		return err
 	}
 
-	_log.Infow("msg", "user updated", "id", user.ID)
+	zap.L().Info("user updated", zap.Int64("id", user.ID))
 	return nil
 }
 
 // Delete 删除用户
 func (uc *UserUsecase) Delete(ctx context.Context, id int64) error {
-	_log := log.NewHelper(uc.logger)
-
 	if id <= 0 {
-		_log.Warnw("msg", "validation failed", "method", "Delete", "reason", "invalid user id")
-		return errors.New("invalid user id")
+		zap.L().Warn("validation failed", zap.String("method", "Delete"), zap.String("reason", "invalid user id"))
+		return nil
 	}
 
 	err := uc.repo.Delete(ctx, id)
 	if err != nil {
-		_log.Errorw("msg", "delete user failed", "id", id, "error", err)
+		zap.L().Error("delete user failed", zap.Int64("id", id), zap.Error(err))
 		return err
 	}
 
-	_log.Infow("msg", "user deleted", "id", id)
+	zap.L().Info("user deleted", zap.Int64("id", id))
 	return nil
 }

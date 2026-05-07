@@ -10,11 +10,6 @@ data:
 
 logger:
   level: info
-  output: ./logs/product.log
-  max_size: 100
-  max_backups: 5
-  max_age: 30
-  compress: true
 
 registry:
   etcd:

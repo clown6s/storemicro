@@ -2,75 +2,41 @@ package log
 
 import (
 	"os"
-	"product/internal/conf"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-// ZapLogger 实现 Kratos log.Logger 接口
+var zapLog *zap.Logger
+
+// NewZapLogger 创建 zap logger
+// 返回 Kratos log.Logger 给 kratos 中间件（logging.Server）桥接使用
+// 同时将 *zap.Logger 存入全局，业务代码通过 zap.L() 获取
+func NewZapLogger(level string) log.Logger {
+	lv := parseLevel(level)
+
+	enc := zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig())
+	core := zapcore.NewCore(enc, zapcore.AddSync(os.Stdout), lv)
+
+	// 业务代码用：通过 zap.L() 获取，caller 正确指向业务代码
+	zapLog = zap.New(core, zap.AddCaller())
+	_ = zap.ReplaceGlobals(zapLog)
+
+	// Kratos 桥接用：Skip 2 层（log.Helper -> ZapLogger.Log -> kratos 调用方）
+	kratosLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(2))
+	return &ZapLogger{logger: kratosLogger}
+}
+
+// ZapLogger 实现 Kratos log.Logger 接口（给 resolver、logging middleware 等内部组件用）
 type ZapLogger struct {
 	logger *zap.Logger
 }
 
-// NewZapLogger 根据配置创建 ZapLogger
-func NewZapLogger(c *conf.Logger) log.Logger {
-	level := zap.NewAtomicLevel()
-	switch c.Level {
-	case "debug":
-		level.SetLevel(zap.DebugLevel)
-	case "info":
-		level.SetLevel(zap.InfoLevel)
-	case "warn":
-		level.SetLevel(zap.WarnLevel)
-	case "error":
-		level.SetLevel(zap.ErrorLevel)
-	default:
-		level.SetLevel(zap.InfoLevel)
-	}
-
-	encoderConfig := zapcore.EncoderConfig{
-		TimeKey:       "time",
-		LevelKey:      "level",
-		CallerKey:     "caller",
-		MessageKey:    "msg",
-		StacktraceKey: "stacktrace",
-		LineEnding:    zapcore.DefaultLineEnding,
-		EncodeTime:    zapcore.ISO8601TimeEncoder,
-		EncodeLevel:   zapcore.LowercaseLevelEncoder,
-		EncodeCaller:  zapcore.ShortCallerEncoder,
-	}
-
-	stdoutSyncer := zapcore.AddSync(os.Stdout)
-	fileSyncer := zapcore.AddSync(&lumberjack.Logger{
-		Filename:   c.Output,
-		MaxSize:    int(c.MaxSize),
-		MaxBackups: int(c.MaxBackups),
-		MaxAge:     int(c.MaxAge),
-		Compress:   c.Compress,
-	})
-
-	multiSyncer := zapcore.NewMultiWriteSyncer(stdoutSyncer, fileSyncer)
-
-	core := zapcore.NewCore(
-		zapcore.NewJSONEncoder(encoderConfig),
-		multiSyncer,
-		level,
-	)
-
-	zapLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(2))
-	return &ZapLogger{logger: zapLogger}
-}
-
-// Log 实现 Kratos log.Logger 接口
 func (l *ZapLogger) Log(level log.Level, keyvals ...any) error {
-	var (
-		zl     zapcore.Level
-		msg    string
-		fields []zap.Field
-	)
+	var zl zapcore.Level
+	var msg string
+	var fields []zap.Field
 
 	switch level {
 	case log.LevelDebug:
@@ -81,8 +47,8 @@ func (l *ZapLogger) Log(level log.Level, keyvals ...any) error {
 		zl = zapcore.WarnLevel
 	case log.LevelError:
 		zl = zapcore.ErrorLevel
-	case log.LevelFatal:
-		zl = zapcore.FatalLevel
+	default:
+		zl = zapcore.InfoLevel
 	}
 
 	for i := 0; i < len(keyvals); i += 2 {
@@ -118,8 +84,6 @@ func (l *ZapLogger) Log(level log.Level, keyvals ...any) error {
 		l.logger.Warn(msg, fields...)
 	case zapcore.ErrorLevel:
 		l.logger.Error(msg, fields...)
-	case zapcore.FatalLevel:
-		l.logger.Fatal(msg, fields...)
 	default:
 		l.logger.Info(msg, fields...)
 	}
@@ -127,7 +91,21 @@ func (l *ZapLogger) Log(level log.Level, keyvals ...any) error {
 	return nil
 }
 
-// Sync 同步缓冲区
 func (l *ZapLogger) Sync() error {
 	return l.logger.Sync()
+}
+
+func parseLevel(s string) zapcore.Level {
+	switch s {
+	case "debug", "DEBUG":
+		return zapcore.DebugLevel
+	case "info", "INFO":
+		return zapcore.InfoLevel
+	case "warn", "WARN", "warning":
+		return zapcore.WarnLevel
+	case "error", "ERROR":
+		return zapcore.ErrorLevel
+	default:
+		return zapcore.InfoLevel
+	}
 }

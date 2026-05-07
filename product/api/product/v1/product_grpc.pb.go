@@ -21,6 +21,7 @@ const _ = grpc.SupportPackageIsVersion9
 const (
 	Product_GetProduct_FullMethodName   = "/api.product.v1.Product/GetProduct"
 	Product_ListProducts_FullMethodName = "/api.product.v1.Product/ListProducts"
+	Product_Ping_FullMethodName         = "/api.product.v1.Product/Ping"
 )
 
 // ProductClient is the client API for Product service.
@@ -29,6 +30,7 @@ const (
 type ProductClient interface {
 	GetProduct(ctx context.Context, in *GetProductReq, opts ...grpc.CallOption) (*GetProductResp, error)
 	ListProducts(ctx context.Context, in *ListProductsReq, opts ...grpc.CallOption) (*ListProductsResp, error)
+	Ping(ctx context.Context, in *PingReq, opts ...grpc.CallOption) (*PingResp, error)
 }
 
 type productClient struct {
@@ -59,12 +61,23 @@ func (c *productClient) ListProducts(ctx context.Context, in *ListProductsReq, o
 	return out, nil
 }
 
+func (c *productClient) Ping(ctx context.Context, in *PingReq, opts ...grpc.CallOption) (*PingResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PingResp)
+	err := c.cc.Invoke(ctx, Product_Ping_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ProductServer is the server API for Product service.
 // All implementations must embed UnimplementedProductServer
 // for forward compatibility.
 type ProductServer interface {
 	GetProduct(context.Context, *GetProductReq) (*GetProductResp, error)
 	ListProducts(context.Context, *ListProductsReq) (*ListProductsResp, error)
+	Ping(context.Context, *PingReq) (*PingResp, error)
 	mustEmbedUnimplementedProductServer()
 }
 
@@ -80,6 +93,9 @@ func (UnimplementedProductServer) GetProduct(context.Context, *GetProductReq) (*
 }
 func (UnimplementedProductServer) ListProducts(context.Context, *ListProductsReq) (*ListProductsResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListProducts not implemented")
+}
+func (UnimplementedProductServer) Ping(context.Context, *PingReq) (*PingResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method Ping not implemented")
 }
 func (UnimplementedProductServer) mustEmbedUnimplementedProductServer() {}
 func (UnimplementedProductServer) testEmbeddedByValue()                 {}
@@ -138,6 +154,24 @@ func _Product_ListProducts_Handler(srv interface{}, ctx context.Context, dec fun
 	return interceptor(ctx, in, info, handler)
 }
 
+func _Product_Ping_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PingReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ProductServer).Ping(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Product_Ping_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ProductServer).Ping(ctx, req.(*PingReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // Product_ServiceDesc is the grpc.ServiceDesc for Product service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -152,6 +186,10 @@ var Product_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListProducts",
 			Handler:    _Product_ListProducts_Handler,
+		},
+		{
+			MethodName: "Ping",
+			Handler:    _Product_Ping_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

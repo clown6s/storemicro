@@ -17,10 +17,22 @@ service Product {
       get: "/api/v1/product/list"
     };
   }
+  rpc Ping (PingReq) returns (PingResp) {
+    option (google.api.http) = {
+      post: "/api/v1/product/ping"
+      body: "*"
+    };
+  }
+}
+
+message PingReq {}
+
+message PingResp {
+  string message = 1;
 }
 
 message GetProductReq {
-  int64 id = 1;
+  string id = 1;
 }
 
 message GetProductResp {
