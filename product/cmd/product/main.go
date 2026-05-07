@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/go-kratos/kratos/v2/transport/grpc"
+	pkgtracing "github.com/storemicro/pkg/tracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
 )
 
@@ -58,6 +60,21 @@ func main() {
 		"grpc_addr", bc.Server.Grpc.Addr,
 		"log_level", bc.Logger.Level,
 	)
+
+	// 初始化链路追踪（OTLP gRPC → Jaeger）
+	shutdown, err := pkgtracing.InitTracer(pkgtracing.Conf{
+		ServiceName: Name,
+		Endpoint:    "10.211.55.5:4317",
+	})
+	if err != nil {
+		helper.Errorf("failed to init jaeger tracer: %v", err)
+		os.Exit(1)
+	}
+	defer func() {
+		if err := shutdown(context.Background()); err != nil {
+			helper.Errorf("failed to shutdown jaeger tracer: %v", err)
+		}
+	}()
 
 	// 创建 etcd client 和 registrar
 	etcdClient, err := clientv3.New(clientv3.Config{

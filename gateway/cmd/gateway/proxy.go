@@ -9,6 +9,8 @@ import (
 	"github.com/go-kratos/kratos/v2/transport/grpc/resolver/discovery"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -61,6 +63,7 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithResolvers(discoveryBuilder),
 		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
+		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 	}
 
 	// 创建 grpc-gateway ServeMux
@@ -90,9 +93,10 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 	return proxy, nil
 }
 
-// ServeHTTP 实现 http.Handler 接口（JWT 认证 → grpc-gateway mux）
+// ServeHTTP 实现 http.Handler 接口（OpenTelemetry → JWT 认证 → grpc-gateway mux）
 func (p *GatewayProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	jwtAuth(p.jwtSecret, p.mux).ServeHTTP(w, r)
+	handler := otelhttp.NewHandler(jwtAuth(p.jwtSecret, p.mux), "gateway")
+	handler.ServeHTTP(w, r)
 }
 
 // Close 关闭所有连接

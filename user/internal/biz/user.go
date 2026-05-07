@@ -8,6 +8,9 @@ import (
 	"user/internal/pkg/redis"
 
 	"github.com/google/wire"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -152,6 +155,15 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 
 // ListUsers 用户列表（分页）
 func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32) ([]*User, int64, error) {
+	// 创建自定义埋点 span
+	ctx, span := otel.Tracer("user-service").Start(ctx, "ListUsers",
+		trace.WithAttributes(
+			attribute.Int("list.page", int(page)),
+			attribute.Int("list.page_size", int(pageSize)),
+		),
+	)
+	defer span.End()
+
 	if page <= 0 {
 		page = 1
 	}
@@ -161,7 +173,19 @@ func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32) ([]*
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	return uc.repo.List(ctx, page, pageSize)
+
+	users, total, err := uc.repo.List(ctx, page, pageSize)
+
+	// 记录结果到 span
+	span.SetAttributes(
+		attribute.Int64("list.total", total),
+		attribute.Int("list.result_count", len(users)),
+	)
+	if err != nil {
+		span.RecordError(err)
+	}
+
+	return users, total, err
 }
 
 // Get 获取用户

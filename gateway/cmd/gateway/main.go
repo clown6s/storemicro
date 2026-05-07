@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
+	pkgtracing "github.com/storemicro/pkg/tracing"
 	"go.uber.org/zap"
 )
 
@@ -28,6 +29,20 @@ func main() {
 	kratosLogger := NewZapLogger(appCfg.Log.Level)
 	defer zapLog.Sync()
 	log.SetLogger(kratosLogger)
+
+	// 初始化链路追踪（OTLP gRPC → Jaeger）
+	shutdown, err := pkgtracing.InitTracer(pkgtracing.Conf{
+		ServiceName: "gateway",
+		Endpoint:    "10.211.55.5:4317",
+	})
+	if err != nil {
+		zapLog.Fatal("failed to init jaeger tracer", zap.Error(err))
+	}
+	defer func() {
+		if err := shutdown(context.Background()); err != nil {
+			zapLog.Error("failed to shutdown jaeger tracer", zap.Error(err))
+		}
+	}()
 
 	// 创建 grpc-gateway 代理
 	proxy, err := NewGatewayProxy(appCfg)
