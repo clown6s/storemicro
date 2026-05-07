@@ -12,18 +12,6 @@ service User {
       get: "/api/v1/user/{id}"
     };
   }
-  rpc CreateUser (CreateUserReq) returns (CreateUserResp) {
-    option (google.api.http) = {
-      post: "/api/v1/user"
-      body: "*"
-    };
-  }
-  rpc Ping (PingReq) returns (PingResp) {
-    option (google.api.http) = {
-      post: "/api/v1/user/ping"
-      body: "*"
-    };
-  }
   // 用户注册
   rpc Register (RegisterReq) returns (RegisterResp) {
     option (google.api.http) = {
@@ -46,29 +34,12 @@ service User {
   }
 }
 
-message PingReq {}
-
-message PingResp {
-  string message = 1;
-}
-
 message GetUserReq {
   int64 id = 1;
 }
 
 message GetUserResp {
   UserInfo user = 1;
-}
-
-message CreateUserReq {
-  string email    = 1;
-  string phone    = 2;
-  string password = 3;
-}
-
-message CreateUserResp {
-  int64  id      = 1;
-  string message  = 2;
 }
 
 // 用户实体（不含密码）
@@ -117,6 +88,8 @@ message LoginResp {
 message ListUsersReq {
   int32 page      = 1;
   int32 pageSize = 2;
+  string phone = 3;
+  string name = 4;
 }
 
 message ListUsersResp {
@@ -125,4 +98,3 @@ message ListUsersResp {
   int32          page      = 3;
   int32          pageSize = 4;
 }
-

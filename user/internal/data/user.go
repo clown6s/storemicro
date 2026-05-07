@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
+	"strings"
 
 	"user/internal/biz"
 	"user/internal/pkg/snowflake"
@@ -88,14 +90,33 @@ func (r *userRepo) GetByPhone(ctx context.Context, phone string) (*biz.User, err
 	return user, nil
 }
 
-func (r *userRepo) List(ctx context.Context, page, pageSize int32) ([]*biz.User, int64, error) {
-	zap.L().Debug("userRepo.List", zap.Int32("page", page), zap.Int32("pageSize", pageSize))
+func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name string) ([]*biz.User, int64, error) {
+	zap.L().Debug("userRepo.List",
+		zap.Int32("page", page), zap.Int32("pageSize", pageSize),
+		zap.String("phone", phone), zap.String("name", name),
+	)
+
+	// 动态拼接 WHERE 条件
+	var conditions []string
+	var args []any
+
+	conditions = append(conditions, "(deleted_at IS NULL OR deleted_at = '')")
+
+	if phone != "" {
+		conditions = append(conditions, "phone LIKE ?")
+		args = append(args, phone+"%")
+	}
+	if name != "" {
+		conditions = append(conditions, "real_name LIKE ?")
+		args = append(args, name+"%")
+	}
+
+	where := strings.Join(conditions, " AND ")
 
 	// 查总数
 	var total int64
-	err := r.data.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM user WHERE deleted_at IS NULL OR deleted_at = ''`,
-	).Scan(&total)
+	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM user WHERE %s", where)
+	err := r.data.db.QueryRowContext(ctx, countSQL, args...).Scan(&total)
 	if err != nil {
 		zap.L().Error("userRepo.List count failed", zap.Error(err))
 		return nil, 0, err
@@ -103,12 +124,15 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32) ([]*biz.User,
 
 	// 分页查询
 	offset := (page - 1) * pageSize
-	rows, err := r.data.db.QueryContext(ctx,
+	querySQL := fmt.Sprintf(
 		`SELECT id, COALESCE(real_name,''), COALESCE(avatar,''), gender, COALESCE(age,0),
 		        phone, COALESCE(email,''), create_time, update_time, COALESCE(remark,'')
-		 FROM user WHERE deleted_at IS NULL OR deleted_at = ''
-		 ORDER BY id DESC LIMIT ? OFFSET ?`, pageSize, offset,
+		 FROM user WHERE %s
+		 ORDER BY id DESC LIMIT ? OFFSET ?`, where,
 	)
+	queryArgs := append(args, pageSize, offset)
+
+	rows, err := r.data.db.QueryContext(ctx, querySQL, queryArgs...)
 	if err != nil {
 		zap.L().Error("userRepo.List query failed", zap.Error(err))
 		return nil, 0, err

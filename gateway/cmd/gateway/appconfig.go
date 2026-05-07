@@ -14,6 +14,7 @@ type AppConfig struct {
 	Server  ServerConfig `yaml:"server"`
 	Etcd    EtcdConfig   `yaml:"etcd"`
 	Jwt     JwtConfig    `yaml:"jwt"`
+	Redis   RedisConfig  `yaml:"redis"`
 	Log     LogConfig    `yaml:"log"`
 }
 
@@ -38,6 +39,13 @@ type JwtConfig struct {
 	Secret string `yaml:"secret"`
 }
 
+// RedisConfig Redis 配置
+type RedisConfig struct {
+	Addr     string `yaml:"addr"`
+	Password string `yaml:"password"`
+	Db       int    `yaml:"db"`
+}
+
 // DefaultAppConfig 返回默认配置
 func DefaultAppConfig() *AppConfig {
 	return &AppConfig{
@@ -47,6 +55,10 @@ func DefaultAppConfig() *AppConfig {
 		Etcd: EtcdConfig{
 			Endpoints:   []string{"10.211.55.5:2379"},
 			DialTimeout: 5 * time.Second,
+		},
+		Redis: RedisConfig{
+			Addr: "10.211.55.5:6379",
+			Db:   0,
 		},
 		Log: LogConfig{
 			Level: "info",

@@ -8,6 +8,7 @@ import (
 	etcdreg "github.com/go-kratos/kratos/contrib/registry/etcd/v2"
 	"github.com/go-kratos/kratos/v2/transport/grpc/resolver/discovery"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"github.com/redis/go-redis/v9"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -29,6 +30,7 @@ type GatewayProxy struct {
 	mux        *runtime.ServeMux
 	conns      []*grpc.ClientConn
 	etcdClient *clientv3.Client
+	rdb        *redis.Client
 	jwtSecret  string
 }
 
@@ -37,6 +39,18 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 	proxy := &GatewayProxy{
 		jwtSecret: cfg.Jwt.Secret,
 	}
+
+	// 创建 Redis 客户端（用于 token 校验，支持单设备登录踢人）
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.Db,
+	})
+	if err := rdb.Ping(context.Background()).Err(); err != nil {
+		return nil, fmt.Errorf("failed to connect redis: %w", err)
+	}
+	proxy.rdb = rdb
+	zapLog.Info("redis connected", zap.String("addr", cfg.Redis.Addr))
 
 	// 创建 etcd client（用于服务发现）
 	etcdClient, err := clientv3.New(clientv3.Config{
@@ -95,7 +109,7 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 
 // ServeHTTP 实现 http.Handler 接口（OpenTelemetry → JWT 认证 → grpc-gateway mux）
 func (p *GatewayProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	handler := otelhttp.NewHandler(jwtAuth(p.jwtSecret, p.mux), "gateway")
+	handler := otelhttp.NewHandler(jwtAuth(p.jwtSecret, p.rdb, p.mux), "gateway")
 	handler.ServeHTTP(w, r)
 }
 
@@ -108,6 +122,9 @@ func (p *GatewayProxy) Close() {
 		}
 	}
 	p.conns = nil
+	if p.rdb != nil {
+		p.rdb.Close()
+	}
 	if p.etcdClient != nil {
 		p.etcdClient.Close()
 	}

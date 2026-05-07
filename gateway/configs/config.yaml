@@ -30,3 +30,9 @@ log:
 # JWT 认证（与 user 服务保持一致的 secret）
 jwt:
   secret: "store-micro-jwt-secret-2026"
+
+# Redis（用于 token 校验，支持单设备登录踢人）
+redis:
+  addr: "10.211.55.5:6379"
+  password: "admin@zzp"
+  db: 0

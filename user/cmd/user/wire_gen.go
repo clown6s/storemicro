@@ -38,7 +38,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, confJwt *conf.Jwt, co
 	userRepo := data.NewUserRepo(dataData)
 	userUsecase := biz.NewUserUsecase(userRepo, j, r)
 	userService := service.NewUserService(userUsecase)
-	grpcServer := server.NewGRPCServer(confServer, logger, userService, j, r)
+	grpcServer := server.NewGRPCServer(confServer, logger, userService)
 	app := newApp(logger, grpcServer, reg)
 
 	return app, func() {

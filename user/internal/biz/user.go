@@ -39,7 +39,7 @@ type UserRepo interface {
 	Create(ctx context.Context, user *User) (int64, error)
 	Get(ctx context.Context, id int64) (*User, error)
 	GetByPhone(ctx context.Context, phone string) (*User, error)
-	List(ctx context.Context, page, pageSize int32) ([]*User, int64, error)
+	List(ctx context.Context, page, pageSize int32, phone, name string) ([]*User, int64, error)
 	Update(ctx context.Context, user *User) error
 	Delete(ctx context.Context, id int64) error
 	EmailExists(ctx context.Context, email string) (bool, error)
@@ -154,12 +154,12 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 }
 
 // ListUsers 用户列表（分页）
-func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32) ([]*User, int64, error) {
+func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32, phone, name string) ([]*User, int64, error) {
 	// 创建自定义埋点 span
 	ctx, span := otel.Tracer("user-service").Start(ctx, "ListUsers",
 		trace.WithAttributes(
 			attribute.Int("list.page", int(page)),
-			attribute.Int("list.page_size", int(pageSize)),
+			attribute.Int("list.pageSize", int(pageSize)),
 		),
 	)
 	defer span.End()
@@ -174,7 +174,7 @@ func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32) ([]*
 		pageSize = 100
 	}
 
-	users, total, err := uc.repo.List(ctx, page, pageSize)
+	users, total, err := uc.repo.List(ctx, page, pageSize, phone, name)
 
 	// 记录结果到 span
 	span.SetAttributes(

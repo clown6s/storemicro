@@ -2,6 +2,7 @@ package redis
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -28,8 +29,25 @@ func NewRedis(addr, password string, db int) *Redis {
 }
 
 // SetToken 存储 token（登录成功后将 token -> userID 写入 Redis，设置过期时间）
+// 同时维护 user_token:{userID} -> token 反向映射，实现单设备登录
 func (r *Redis) SetToken(ctx context.Context, token string, userID int64, expire time.Duration) error {
-	return r.client.Set(ctx, "storemicro:token:"+token, userID, expire).Err()
+	pipe := r.client.Pipeline()
+
+	// 1) 查旧 token（通过 user_token:{userID} 反向映射）
+	oldTokenKey := fmt.Sprintf("storemicro:user_token:%d", userID)
+	oldToken, err := r.client.Get(ctx, oldTokenKey).Result()
+	if err == nil && oldToken != "" {
+		// 2) 删旧 token 的正向映射
+		pipe.Del(ctx, "storemicro:token:"+oldToken)
+	}
+
+	// 3) 写新 token 正向映射
+	pipe.Set(ctx, "storemicro:token:"+token, userID, expire)
+	// 4) 写 user_token 反向映射（TTL 与 token 一致）
+	pipe.Set(ctx, oldTokenKey, token, expire)
+
+	_, err = pipe.Exec(ctx)
+	return err
 }
 
 // GetUserIDByToken 通过 token 查询 userID，同时起到"验证 token 是否有效"的作用
@@ -46,8 +64,12 @@ func (r *Redis) GetUserIDByToken(ctx context.Context, token string) (int64, erro
 }
 
 // DeleteToken 删除 token（登出时使用）
-func (r *Redis) DeleteToken(ctx context.Context, token string) error {
-	return r.client.Del(ctx, "token:"+token).Err()
+func (r *Redis) DeleteToken(ctx context.Context, token string, userID int64) error {
+	pipe := r.client.Pipeline()
+	pipe.Del(ctx, "storemicro:token:"+token)
+	pipe.Del(ctx, fmt.Sprintf("storemicro:user_token:%d", userID))
+	_, err := pipe.Exec(ctx)
+	return err
 }
 
 // Close 关闭 Redis 连接

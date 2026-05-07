@@ -32,7 +32,7 @@ func main() {
 
 	// 初始化链路追踪（OTLP gRPC → Jaeger）
 	shutdown, err := pkgtracing.InitTracer(pkgtracing.Conf{
-		ServiceName: "gateway",
+		ServiceName: "storemicro-gateway",
 		Endpoint:    "10.211.55.5:4317",
 	})
 	if err != nil {

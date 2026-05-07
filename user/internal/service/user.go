@@ -25,8 +25,6 @@ func NewUserService(uc *biz.UserUsecase) *UserService {
 	return &UserService{uc: uc}
 }
 
-// ---- 旧接口兼容 ----
-
 func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*userv1.GetUserResp, error) {
 	zap.L().Info("GetUser called", zap.Int64("id", req.Id))
 
@@ -43,26 +41,6 @@ func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*use
 		User: s.toUserInfo(user),
 	}, nil
 }
-
-func (s *UserService) CreateUser(ctx context.Context, req *userv1.CreateUserReq) (*userv1.CreateUserResp, error) {
-	zap.L().Info("CreateUser called", zap.String("email", req.Email))
-
-	user, err := s.uc.Create(ctx, req.Phone, req.Email)
-	if err != nil {
-		zap.L().Warn("CreateUser failed", zap.String("email", req.Email), zap.Error(err))
-		return nil, s.mapError(err)
-	}
-	return &userv1.CreateUserResp{
-		Id:      user.ID,
-		Message: "created",
-	}, nil
-}
-
-func (s *UserService) Ping(ctx context.Context, req *userv1.PingReq) (*userv1.PingResp, error) {
-	return &userv1.PingResp{Message: "pong"}, nil
-}
-
-// ---- 新接口 ----
 
 // Register 用户注册
 func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error) {
@@ -109,9 +87,14 @@ func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.
 
 // ListUsers 用户列表（分页）
 func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (*userv1.ListUsersResp, error) {
-	zap.L().Info("ListUsers called", zap.Int32("page", req.Page), zap.Int32("page_size", req.PageSize))
+	zap.L().Info("ListUsers called",
+		zap.Int32("page", req.Page),
+		zap.Int32("pageSize", req.PageSize),
+		zap.String("phone", req.Phone),
+		zap.String("name", req.Name),
+	)
 
-	users, total, err := s.uc.ListUsers(ctx, req.Page, req.PageSize)
+	users, total, err := s.uc.ListUsers(ctx, req.Page, req.PageSize, req.Phone, req.Name)
 	if err != nil {
 		zap.L().Warn("ListUsers failed", zap.Error(err))
 		return nil, s.mapError(err)

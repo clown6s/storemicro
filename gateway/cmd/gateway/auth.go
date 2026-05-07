@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -24,8 +25,8 @@ var noAuthPaths = map[string]bool{
 	"/api/v1/product/ping":  true,
 }
 
-// jwtAuth JWT 认证中间件
-func jwtAuth(secret string, next http.Handler) http.Handler {
+// jwtAuth JWT 认证中间件（JWT 签名校验 + Redis token 有效性校验，支持单设备登录踢人）
+func jwtAuth(secret string, rdb *redis.Client, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
@@ -52,7 +53,7 @@ func jwtAuth(secret string, next http.Handler) http.Handler {
 			tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
 		}
 
-		// 解析并校验 JWT
+		// 1) 解析并校验 JWT 签名
 		token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
 			return []byte(secret), nil
 		})
@@ -65,12 +66,32 @@ func jwtAuth(secret string, next http.Handler) http.Handler {
 			return
 		}
 
-		// 将 user_id 写入 context，下游可取用
-		if claims, ok := token.Claims.(*Claims); ok {
-			ctx := context.WithValue(r.Context(), "user_id", claims.UserID)
-			ctx = context.WithValue(ctx, "phone", claims.Phone)
-			r = r.WithContext(ctx)
+		claims, ok := token.Claims.(*Claims)
+		if !ok {
+			http.Error(w, `{"code":401,"message":"invalid claims"}`, http.StatusUnauthorized)
+			return
 		}
+
+		// 2) Redis 校验：token 是否仍然有效（被踢掉的旧 token 会被删除）
+		val, err := rdb.Get(r.Context(), "storemicro:token:"+tokenStr).Result()
+		if err == redis.Nil {
+			zapLog.Warn("jwt auth failed: token revoked (logged in elsewhere)",
+				zap.String("path", path),
+				zap.Int64("user_id", claims.UserID),
+			)
+			http.Error(w, `{"code":401,"message":"token expired, please re-login"}`, http.StatusUnauthorized)
+			return
+		} else if err != nil {
+			zapLog.Error("redis check token failed", zap.Error(err))
+			// Redis 不可用时降级：仅 JWT 校验通过就放行
+		} else {
+			_ = val // val 是 userID，可按需记录
+		}
+
+		// 将 user_id 写入 context，下游可取用
+		ctx := context.WithValue(r.Context(), "user_id", claims.UserID)
+		ctx = context.WithValue(ctx, "phone", claims.Phone)
+		r = r.WithContext(ctx)
 
 		next.ServeHTTP(w, r)
 	})
