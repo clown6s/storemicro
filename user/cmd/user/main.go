@@ -9,6 +9,7 @@ import (
 
 	"user/internal/conf"
 	zaplog "user/internal/pkg/log"
+	"user/internal/pkg/snowflake"
 
 	"github.com/go-kratos/kratos/contrib/registry/etcd/v2"
 	"github.com/go-kratos/kratos/v2"
@@ -72,7 +73,14 @@ func main() {
 	reg := etcd.New(etcdClient)
 	helper.Infow("msg", "etcd registry connected", "endpoints", bc.Registry.Etcd.Endpoints)
 
-	app, cleanup, err := wireApp(bc.Server, bc.Data, zapLogger, reg)
+	// 通过 etcd 自动分配雪花算法 node_id
+	if err := snowflake.InitWithEtcd(etcdClient, Name); err != nil {
+		helper.Errorf("failed to init snowflake: %v", err)
+		os.Exit(1)
+	}
+	helper.Infow("msg", "snowflake initialized", "node_id", snowflake.NodeID)
+
+	app, cleanup, err := wireApp(bc.Server, bc.Data, bc.Jwt, bc.Redis, zapLogger, reg)
 	if err != nil {
 		helper.Errorf("failed to wire app: %v", err)
 		os.Exit(1)

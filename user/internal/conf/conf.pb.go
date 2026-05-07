@@ -28,6 +28,8 @@ type Bootstrap struct {
 	Data          *Data                  `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
 	Logger        *Logger                `protobuf:"bytes,3,opt,name=logger,proto3" json:"logger,omitempty"`
 	Registry      *Registry              `protobuf:"bytes,4,opt,name=registry,proto3" json:"registry,omitempty"`
+	Jwt           *Jwt                   `protobuf:"bytes,5,opt,name=jwt,proto3" json:"jwt,omitempty"`
+	Redis         *Redis                 `protobuf:"bytes,6,opt,name=redis,proto3" json:"redis,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -86,6 +88,20 @@ func (x *Bootstrap) GetLogger() *Logger {
 func (x *Bootstrap) GetRegistry() *Registry {
 	if x != nil {
 		return x.Registry
+	}
+	return nil
+}
+
+func (x *Bootstrap) GetJwt() *Jwt {
+	if x != nil {
+		return x.Jwt
+	}
+	return nil
+}
+
+func (x *Bootstrap) GetRedis() *Redis {
+	if x != nil {
+		return x.Redis
 	}
 	return nil
 }
@@ -266,6 +282,120 @@ func (x *Registry) GetEtcd() *Registry_Etcd {
 	return nil
 }
 
+// JWT 配置
+type Jwt struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Secret        string                 `protobuf:"bytes,1,opt,name=secret,proto3" json:"secret,omitempty"`                               // 签名密钥
+	ExpireHours   int64                  `protobuf:"varint,2,opt,name=expire_hours,json=expireHours,proto3" json:"expire_hours,omitempty"` // token 有效期（小时）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Jwt) Reset() {
+	*x = Jwt{}
+	mi := &file_internal_conf_conf_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Jwt) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Jwt) ProtoMessage() {}
+
+func (x *Jwt) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_conf_conf_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Jwt.ProtoReflect.Descriptor instead.
+func (*Jwt) Descriptor() ([]byte, []int) {
+	return file_internal_conf_conf_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *Jwt) GetSecret() string {
+	if x != nil {
+		return x.Secret
+	}
+	return ""
+}
+
+func (x *Jwt) GetExpireHours() int64 {
+	if x != nil {
+		return x.ExpireHours
+	}
+	return 0
+}
+
+// Redis 配置
+type Redis struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Addr          string                 `protobuf:"bytes,1,opt,name=addr,proto3" json:"addr,omitempty"`         // redis 地址，如 10.211.55.5:6379
+	Password      string                 `protobuf:"bytes,2,opt,name=password,proto3" json:"password,omitempty"` // redis 密码
+	Db            int32                  `protobuf:"varint,3,opt,name=db,proto3" json:"db,omitempty"`            // redis DB 号
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Redis) Reset() {
+	*x = Redis{}
+	mi := &file_internal_conf_conf_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Redis) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Redis) ProtoMessage() {}
+
+func (x *Redis) ProtoReflect() protoreflect.Message {
+	mi := &file_internal_conf_conf_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Redis.ProtoReflect.Descriptor instead.
+func (*Redis) Descriptor() ([]byte, []int) {
+	return file_internal_conf_conf_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *Redis) GetAddr() string {
+	if x != nil {
+		return x.Addr
+	}
+	return ""
+}
+
+func (x *Redis) GetPassword() string {
+	if x != nil {
+		return x.Password
+	}
+	return ""
+}
+
+func (x *Redis) GetDb() int32 {
+	if x != nil {
+		return x.Db
+	}
+	return 0
+}
+
 type Server_GRPC struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Addr          string                 `protobuf:"bytes,1,opt,name=addr,proto3" json:"addr,omitempty"`
@@ -276,7 +406,7 @@ type Server_GRPC struct {
 
 func (x *Server_GRPC) Reset() {
 	*x = Server_GRPC{}
-	mi := &file_internal_conf_conf_proto_msgTypes[5]
+	mi := &file_internal_conf_conf_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -288,7 +418,7 @@ func (x *Server_GRPC) String() string {
 func (*Server_GRPC) ProtoMessage() {}
 
 func (x *Server_GRPC) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_conf_conf_proto_msgTypes[5]
+	mi := &file_internal_conf_conf_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -328,7 +458,7 @@ type Data_Database struct {
 
 func (x *Data_Database) Reset() {
 	*x = Data_Database{}
-	mi := &file_internal_conf_conf_proto_msgTypes[6]
+	mi := &file_internal_conf_conf_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -340,7 +470,7 @@ func (x *Data_Database) String() string {
 func (*Data_Database) ProtoMessage() {}
 
 func (x *Data_Database) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_conf_conf_proto_msgTypes[6]
+	mi := &file_internal_conf_conf_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -380,7 +510,7 @@ type Registry_Etcd struct {
 
 func (x *Registry_Etcd) Reset() {
 	*x = Registry_Etcd{}
-	mi := &file_internal_conf_conf_proto_msgTypes[7]
+	mi := &file_internal_conf_conf_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -392,7 +522,7 @@ func (x *Registry_Etcd) String() string {
 func (*Registry_Etcd) ProtoMessage() {}
 
 func (x *Registry_Etcd) ProtoReflect() protoreflect.Message {
-	mi := &file_internal_conf_conf_proto_msgTypes[7]
+	mi := &file_internal_conf_conf_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -426,13 +556,15 @@ var File_internal_conf_conf_proto protoreflect.FileDescriptor
 
 const file_internal_conf_conf_proto_rawDesc = "" +
 	"\n" +
-	"\x18internal/conf/conf.proto\x12\x04conf\x1a\x1egoogle/protobuf/duration.proto\"\xa3\x01\n" +
+	"\x18internal/conf/conf.proto\x12\x04conf\x1a\x1egoogle/protobuf/duration.proto\"\xe3\x01\n" +
 	"\tBootstrap\x12$\n" +
 	"\x06server\x18\x01 \x01(\v2\f.conf.ServerR\x06server\x12\x1e\n" +
 	"\x04data\x18\x02 \x01(\v2\n" +
 	".conf.DataR\x04data\x12$\n" +
 	"\x06logger\x18\x03 \x01(\v2\f.conf.LoggerR\x06logger\x12*\n" +
-	"\bregistry\x18\x04 \x01(\v2\x0e.conf.RegistryR\bregistry\"\x80\x01\n" +
+	"\bregistry\x18\x04 \x01(\v2\x0e.conf.RegistryR\bregistry\x12\x1b\n" +
+	"\x03jwt\x18\x05 \x01(\v2\t.conf.JwtR\x03jwt\x12!\n" +
+	"\x05redis\x18\x06 \x01(\v2\v.conf.RedisR\x05redis\"\x80\x01\n" +
 	"\x06Server\x12%\n" +
 	"\x04grpc\x18\x01 \x01(\v2\x11.conf.Server.GRPCR\x04grpc\x1aO\n" +
 	"\x04GRPC\x12\x12\n" +
@@ -449,7 +581,14 @@ const file_internal_conf_conf_proto_rawDesc = "" +
 	"\x04etcd\x18\x01 \x01(\v2\x13.conf.Registry.EtcdR\x04etcd\x1a>\n" +
 	"\x04Etcd\x12\x1c\n" +
 	"\tendpoints\x18\x01 \x03(\tR\tendpoints\x12\x18\n" +
-	"\atimeout\x18\x02 \x01(\x03R\atimeoutB\x19Z\x17user/internal/conf;confb\x06proto3"
+	"\atimeout\x18\x02 \x01(\x03R\atimeout\"@\n" +
+	"\x03Jwt\x12\x16\n" +
+	"\x06secret\x18\x01 \x01(\tR\x06secret\x12!\n" +
+	"\fexpire_hours\x18\x02 \x01(\x03R\vexpireHours\"G\n" +
+	"\x05Redis\x12\x12\n" +
+	"\x04addr\x18\x01 \x01(\tR\x04addr\x12\x1a\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\x12\x0e\n" +
+	"\x02db\x18\x03 \x01(\x05R\x02dbB\x19Z\x17user/internal/conf;confb\x06proto3"
 
 var (
 	file_internal_conf_conf_proto_rawDescOnce sync.Once
@@ -463,32 +602,36 @@ func file_internal_conf_conf_proto_rawDescGZIP() []byte {
 	return file_internal_conf_conf_proto_rawDescData
 }
 
-var file_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_internal_conf_conf_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_internal_conf_conf_proto_goTypes = []any{
 	(*Bootstrap)(nil),           // 0: conf.Bootstrap
 	(*Server)(nil),              // 1: conf.Server
 	(*Data)(nil),                // 2: conf.Data
 	(*Logger)(nil),              // 3: conf.Logger
 	(*Registry)(nil),            // 4: conf.Registry
-	(*Server_GRPC)(nil),         // 5: conf.Server.GRPC
-	(*Data_Database)(nil),       // 6: conf.Data.Database
-	(*Registry_Etcd)(nil),       // 7: conf.Registry.Etcd
-	(*durationpb.Duration)(nil), // 8: google.protobuf.Duration
+	(*Jwt)(nil),                 // 5: conf.Jwt
+	(*Redis)(nil),               // 6: conf.Redis
+	(*Server_GRPC)(nil),         // 7: conf.Server.GRPC
+	(*Data_Database)(nil),       // 8: conf.Data.Database
+	(*Registry_Etcd)(nil),       // 9: conf.Registry.Etcd
+	(*durationpb.Duration)(nil), // 10: google.protobuf.Duration
 }
 var file_internal_conf_conf_proto_depIdxs = []int32{
-	1, // 0: conf.Bootstrap.server:type_name -> conf.Server
-	2, // 1: conf.Bootstrap.data:type_name -> conf.Data
-	3, // 2: conf.Bootstrap.logger:type_name -> conf.Logger
-	4, // 3: conf.Bootstrap.registry:type_name -> conf.Registry
-	5, // 4: conf.Server.grpc:type_name -> conf.Server.GRPC
-	6, // 5: conf.Data.database:type_name -> conf.Data.Database
-	7, // 6: conf.Registry.etcd:type_name -> conf.Registry.Etcd
-	8, // 7: conf.Server.GRPC.timeout:type_name -> google.protobuf.Duration
-	8, // [8:8] is the sub-list for method output_type
-	8, // [8:8] is the sub-list for method input_type
-	8, // [8:8] is the sub-list for extension type_name
-	8, // [8:8] is the sub-list for extension extendee
-	0, // [0:8] is the sub-list for field type_name
+	1,  // 0: conf.Bootstrap.server:type_name -> conf.Server
+	2,  // 1: conf.Bootstrap.data:type_name -> conf.Data
+	3,  // 2: conf.Bootstrap.logger:type_name -> conf.Logger
+	4,  // 3: conf.Bootstrap.registry:type_name -> conf.Registry
+	5,  // 4: conf.Bootstrap.jwt:type_name -> conf.Jwt
+	6,  // 5: conf.Bootstrap.redis:type_name -> conf.Redis
+	7,  // 6: conf.Server.grpc:type_name -> conf.Server.GRPC
+	8,  // 7: conf.Data.database:type_name -> conf.Data.Database
+	9,  // 8: conf.Registry.etcd:type_name -> conf.Registry.Etcd
+	10, // 9: conf.Server.GRPC.timeout:type_name -> google.protobuf.Duration
+	10, // [10:10] is the sub-list for method output_type
+	10, // [10:10] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_internal_conf_conf_proto_init() }
@@ -502,7 +645,7 @@ func file_internal_conf_conf_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_internal_conf_conf_proto_rawDesc), len(file_internal_conf_conf_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

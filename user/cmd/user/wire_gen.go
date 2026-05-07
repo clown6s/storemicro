@@ -10,6 +10,8 @@ import (
 	"user/internal/biz"
 	"user/internal/conf"
 	"user/internal/data"
+	"user/internal/pkg/jwt"
+	"user/internal/pkg/redis"
 	"user/internal/server"
 	"user/internal/service"
 
@@ -18,16 +20,27 @@ import (
 	"github.com/go-kratos/kratos/v2/registry"
 )
 
-func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, reg registry.Registrar) (*kratos.App, func(), error) {
-	dataData, cleanup, err := data.NewData(confData, logger)
+func wireApp(confServer *conf.Server, confData *conf.Data, confJwt *conf.Jwt, confRedis *conf.Redis, logger log.Logger, reg registry.Registrar) (*kratos.App, func(), error) {
+	// Redis
+	r := redis.NewRedis(confRedis.Addr, confRedis.Password, int(confRedis.Db))
+
+	// Data（数据库 + Redis）
+	dataData, cleanup, err := data.NewData(confData, r, logger)
 	if err != nil {
+		r.Close()
 		return nil, nil, err
 	}
+
+	// JWT
+	j := jwt.NewJWT(confJwt.Secret, confJwt.ExpireHours)
+
+	// Repo → Usecase → Service → gRPC Server → App
 	userRepo := data.NewUserRepo(dataData)
-	userUsecase := biz.NewUserUsecase(userRepo)
+	userUsecase := biz.NewUserUsecase(userRepo, j, r)
 	userService := service.NewUserService(userUsecase)
-	grpcServer := server.NewGRPCServer(confServer, logger, userService)
+	grpcServer := server.NewGRPCServer(confServer, logger, userService, j, r)
 	app := newApp(logger, grpcServer, reg)
+
 	return app, func() {
 		cleanup()
 	}, nil

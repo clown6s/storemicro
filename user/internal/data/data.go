@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"user/internal/conf"
+	"user/internal/pkg/redis"
 
 	"github.com/go-kratos/kratos/v2/log"
 	_ "github.com/go-sql-driver/mysql"
@@ -16,13 +17,14 @@ import (
 // ProviderSet is data providers.
 var ProviderSet = wire.NewSet(NewData, NewUserRepo)
 
-// Data 数据库包装
+// Data 数据库 + Redis 包装
 type Data struct {
-	db *sql.DB
+	db    *sql.DB
+	redis *redis.Redis
 }
 
-// NewData 创建 Data 实例（logger 仅用于 kratos 框架桥接）
-func NewData(c *conf.Data, logger log.Logger) (*Data, func(), error) {
+// NewData 创建 Data 实例
+func NewData(c *conf.Data, r *redis.Redis, logger log.Logger) (*Data, func(), error) {
 	db, err := sql.Open("mysql", c.Database.Source)
 	if err != nil {
 		return nil, nil, err
@@ -36,10 +38,11 @@ func NewData(c *conf.Data, logger log.Logger) (*Data, func(), error) {
 		return nil, nil, err
 	}
 
-	d := &Data{db: db}
+	d := &Data{db: db, redis: r}
 	cleanup := func() {
 		zap.L().Info("closing the data resources")
 		_ = d.db.Close()
+		_ = d.redis.Close()
 	}
 	return d, cleanup, nil
 }

@@ -23,8 +23,9 @@ func NewZapLogger(level string) log.Logger {
 	zapLog = zap.New(core, zap.AddCaller())
 	_ = zap.ReplaceGlobals(zapLog)
 
-	// Kratos 桥接用：Skip 2 层（log.Helper -> ZapLogger.Log -> kratos 调用方）
-	kratosLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(2))
+	// Kratos 桥接用：不开启 caller，因为 Kratos 内部调用层数不确定，
+	// caller 会指向 log/helper.go 而非业务代码，没有实际意义
+	kratosLogger := zap.New(core)
 	return &ZapLogger{logger: kratosLogger}
 }
 

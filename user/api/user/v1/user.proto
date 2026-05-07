@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package api.user.v1;
 
-option go_package = "github.com/36111/kratos-services/user/api/user/v1;userv1";
+option go_package = "user/api/user/v1;userv1";
 
 import "google/api/annotations.proto";
 
@@ -24,6 +24,26 @@ service User {
       body: "*"
     };
   }
+  // 用户注册
+  rpc Register (RegisterReq) returns (RegisterResp) {
+    option (google.api.http) = {
+      post: "/api/v1/user/register"
+      body: "*"
+    };
+  }
+  // 用户登录（手机号+密码）
+  rpc Login (LoginReq) returns (LoginResp) {
+    option (google.api.http) = {
+      post: "/api/v1/user/login"
+      body: "*"
+    };
+  }
+  // 用户列表（分页）
+  rpc ListUsers (ListUsersReq) returns (ListUsersResp) {
+    option (google.api.http) = {
+      get: "/api/v1/user/list"
+    };
+  }
 }
 
 message PingReq {}
@@ -33,23 +53,76 @@ message PingResp {
 }
 
 message GetUserReq {
-  string id = 1;
+  int64 id = 1;
 }
 
 message GetUserResp {
-  int64 id = 1;
-  string name = 2;
-  string email = 3;
+  UserInfo user = 1;
 }
 
 message CreateUserReq {
-  string name = 1;
-  string email = 2;
+  string email    = 1;
+  string phone    = 2;
+  string password = 3;
 }
 
 message CreateUserResp {
-  int64 id = 1;
-  string message = 2;
+  int64  id      = 1;
+  string message  = 2;
 }
 
+// 用户实体（不含密码）
+message UserInfo {
+  int64  id          = 1;
+  string email       = 2;
+  string phone       = 3;
+  string realName    = 4;
+  string avatar      = 5;
+  int32  gender      = 6;
+  int32  age         = 7;
+  string createTime  = 8;
+  string updateTime  = 9;
+  string remark      = 10;
+}
+
+// 注册
+message RegisterReq {
+  string phone      = 1;
+  string password   = 2;
+  string email      = 3;
+  string realName   = 4;
+  string avatar     = 5;
+  int32  gender     = 6;
+  int32  age        = 7;
+  string remark     = 8;
+}
+
+message RegisterResp {
+  int64  id      = 1;
+  string message  = 2;
+}
+
+// 登录
+message LoginReq {
+  string phone    = 1;
+  string password = 2;
+}
+
+message LoginResp {
+  string  token = 1;
+  UserInfo user  = 2;
+}
+
+// 用户列表（分页）
+message ListUsersReq {
+  int32 page      = 1;
+  int32 pageSize = 2;
+}
+
+message ListUsersResp {
+  repeated UserInfo users     = 1;
+  int64          total     = 2;
+  int32          page      = 3;
+  int32          pageSize = 4;
+}
 

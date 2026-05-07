@@ -4,115 +4,224 @@ import (
 	"context"
 	"errors"
 
+	"user/internal/pkg/jwt"
+	"user/internal/pkg/redis"
+
 	"github.com/google/wire"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // ProviderSet is biz providers.
 var ProviderSet = wire.NewSet(NewUserUsecase)
 
-// User 领域模型
+// User 领域模型（对应数据库 user 表全部字段）
 type User struct {
-	ID    int64
-	Name  string
-	Email string
+	ID         int64
+	Password   string // bcrypt 加密后的密码
+	RealName   string
+	Avatar     string
+	Gender     int32
+	Age        int32
+	Phone      string
+	Email      string
+	CreateTime string
+	UpdateTime string
+	Remark     string
+	DeletedAt  string
 }
 
 // UserRepo 数据仓库接口（由 data 层实现）
 type UserRepo interface {
 	Create(ctx context.Context, user *User) (int64, error)
 	Get(ctx context.Context, id int64) (*User, error)
+	GetByPhone(ctx context.Context, phone string) (*User, error)
+	List(ctx context.Context, page, pageSize int32) ([]*User, int64, error)
 	Update(ctx context.Context, user *User) error
 	Delete(ctx context.Context, id int64) error
 	EmailExists(ctx context.Context, email string) (bool, error)
+	PhoneExists(ctx context.Context, phone string) (bool, error)
 }
 
 // UserUsecase 用户用例
 type UserUsecase struct {
-	repo UserRepo
+	repo  UserRepo
+	jwt   *jwt.JWT
+	redis *redis.Redis
 }
 
 // NewUserUsecase 创建用户用例
-func NewUserUsecase(repo UserRepo) *UserUsecase {
-	return &UserUsecase{repo: repo}
+func NewUserUsecase(repo UserRepo, j *jwt.JWT, r *redis.Redis) *UserUsecase {
+	return &UserUsecase{repo: repo, jwt: j, redis: r}
 }
 
-// Create 创建用户
-func (uc *UserUsecase) Create(ctx context.Context, name, email string) (*User, error) {
-	if name == "" {
-		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "name is required"))
-		return nil, errors.New("name is required")
+// Register 用户注册
+func (uc *UserUsecase) Register(ctx context.Context, user *User) (int64, error) {
+	// 参数校验
+	if user.Phone == "" {
+		zap.L().Warn("validation failed", zap.String("method", "Register"), zap.String("reason", "phone is required"))
+		return 0, errors.New("phone is required")
 	}
-	if email == "" {
-		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "email is required"))
-		return nil, errors.New("email is required")
+	if user.Password == "" {
+		zap.L().Warn("validation failed", zap.String("method", "Register"), zap.String("reason", "password is required"))
+		return 0, errors.New("password is required")
 	}
 
-	exists, err := uc.repo.EmailExists(ctx, email)
+	// 手机号唯一性
+	exists, err := uc.repo.PhoneExists(ctx, user.Phone)
 	if err != nil {
-		zap.L().Error("check email failed", zap.String("email", email), zap.Error(err))
-		return nil, err
+		zap.L().Error("check phone failed", zap.String("phone", user.Phone), zap.Error(err))
+		return 0, err
 	}
 	if exists {
-		zap.L().Warn("email already exists", zap.String("email", email))
-		return nil, errors.New("email already exists")
+		zap.L().Warn("phone already exists", zap.String("phone", user.Phone))
+		return 0, errors.New("phone already exists")
 	}
 
-	user := &User{Name: name, Email: email}
+	// 邮箱唯一性（如果提供了邮箱）
+	if user.Email != "" {
+		exists, err = uc.repo.EmailExists(ctx, user.Email)
+		if err != nil {
+			zap.L().Error("check email failed", zap.String("email", user.Email), zap.Error(err))
+			return 0, err
+		}
+		if exists {
+			zap.L().Warn("email already exists", zap.String("email", user.Email))
+			return 0, errors.New("email already exists")
+		}
+	}
+
+	// bcrypt 加密密码
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	if err != nil {
+		zap.L().Error("bcrypt hash failed", zap.Error(err))
+		return 0, errors.New("password encryption failed")
+	}
+	user.Password = string(hashedPwd)
+
+	// 写入数据库
 	id, err := uc.repo.Create(ctx, user)
 	if err != nil {
 		zap.L().Error("create user failed", zap.Error(err))
-		return nil, err
+		return 0, err
 	}
 
-	user.ID = id
-	zap.L().Info("user created", zap.Int64("id", id), zap.String("name", name), zap.String("email", email))
-	return user, nil
+	zap.L().Info("user registered", zap.Int64("id", id), zap.String("phone", user.Phone))
+	return id, nil
+}
+
+// Login 用户登录（手机号+密码），返回 JWT token 和用户信息
+func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (string, *User, error) {
+	if phone == "" {
+		return "", nil, errors.New("phone is required")
+	}
+	if password == "" {
+		return "", nil, errors.New("password is required")
+	}
+
+	// 查找用户
+	user, err := uc.repo.GetByPhone(ctx, phone)
+	if err != nil {
+		zap.L().Warn("login failed: user not found", zap.String("phone", phone), zap.Error(err))
+		return "", nil, errors.New("phone or password incorrect")
+	}
+
+	// 验证密码
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
+		zap.L().Warn("login failed: password incorrect", zap.String("phone", phone))
+		return "", nil, errors.New("phone or password incorrect")
+	}
+
+	// 生成 JWT token
+	token, err := uc.jwt.GenerateToken(user.ID, user.Phone)
+	if err != nil {
+		zap.L().Error("generate token failed", zap.Int64("id", user.ID), zap.Error(err))
+		return "", nil, errors.New("generate token failed")
+	}
+
+	// 将 token 存入 Redis（与 JWT 过期时间一致）
+	expireHours := uc.jwt.ExpireHours()
+	if err := uc.redis.SetToken(ctx, token, user.ID, expireHours); err != nil {
+		zap.L().Error("store token to redis failed", zap.Int64("id", user.ID), zap.Error(err))
+		return "", nil, errors.New("store token failed")
+	}
+
+	zap.L().Info("user logged in", zap.Int64("id", user.ID), zap.String("phone", phone))
+	return token, user, nil
+}
+
+// ListUsers 用户列表（分页）
+func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32) ([]*User, int64, error) {
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+	return uc.repo.List(ctx, page, pageSize)
 }
 
 // Get 获取用户
 func (uc *UserUsecase) Get(ctx context.Context, id int64) (*User, error) {
-	if id <= 0 {
+	if id == 0 {
 		zap.L().Warn("validation failed", zap.String("method", "Get"), zap.String("reason", "invalid user id"))
 		return nil, errors.New("invalid user id")
 	}
 	return uc.repo.Get(ctx, id)
 }
 
+// Create 创建用户（旧接口保留兼容）
+func (uc *UserUsecase) Create(ctx context.Context, phone, email string) (*User, error) {
+	if phone == "" {
+		return nil, errors.New("phone is required")
+	}
+	if email == "" {
+		return nil, errors.New("email is required")
+	}
+	exists, err := uc.repo.EmailExists(ctx, email)
+	if err != nil {
+		return nil, err
+	}
+	if exists {
+		return nil, errors.New("email already exists")
+	}
+	user := &User{Phone: phone, Email: email}
+	id, err := uc.repo.Create(ctx, user)
+	if err != nil {
+		return nil, err
+	}
+	user.ID = id
+	return user, nil
+}
+
 // Update 更新用户
 func (uc *UserUsecase) Update(ctx context.Context, user *User) error {
-	if user.ID <= 0 {
-		zap.L().Warn("validation failed", zap.String("method", "Update"), zap.String("reason", "invalid user id"))
+	if user.ID == 0 {
 		return errors.New("invalid user id")
 	}
-	if user.Name == "" && user.Email == "" {
-		zap.L().Warn("validation failed", zap.String("method", "Update"), zap.String("reason", "nothing to update"))
+	if user.RealName == "" && user.Email == "" && user.Avatar == "" {
 		return errors.New("nothing to update")
 	}
-
 	err := uc.repo.Update(ctx, user)
 	if err != nil {
-		zap.L().Error("update user failed", zap.Int64("id", user.ID), zap.Error(err))
 		return err
 	}
-
 	zap.L().Info("user updated", zap.Int64("id", user.ID))
 	return nil
 }
 
 // Delete 删除用户
 func (uc *UserUsecase) Delete(ctx context.Context, id int64) error {
-	if id <= 0 {
-		zap.L().Warn("validation failed", zap.String("method", "Delete"), zap.String("reason", "invalid user id"))
+	if id == 0 {
 		return nil
 	}
-
 	err := uc.repo.Delete(ctx, id)
 	if err != nil {
-		zap.L().Error("delete user failed", zap.Int64("id", id), zap.Error(err))
 		return err
 	}
-
 	zap.L().Info("user deleted", zap.Int64("id", id))
 	return nil
 }

@@ -7,15 +7,17 @@ option go_package = "user/internal/conf;conf";
 import "google/protobuf/duration.proto";
 
 message Bootstrap {
-  Server server = 1;
-  Data data = 2;
-  Logger logger = 3;
+  Server server    = 1;
+  Data   data      = 2;
+  Logger logger    = 3;
   Registry registry = 4;
+  Jwt       jwt       = 5;
+  Redis     redis     = 6;
 }
 
 message Server {
   message GRPC {
-    string addr = 1;
+    string                addr = 1;
     google.protobuf.Duration timeout = 2;
   }
   GRPC grpc = 1;
@@ -36,7 +38,20 @@ message Logger {
 message Registry {
   message Etcd {
     repeated string endpoints = 1;
-    int64 timeout = 2;
+    int64     timeout    = 2;
   }
   Etcd etcd = 1;
+}
+
+// JWT 配置
+message Jwt {
+  string secret     = 1;  // 签名密钥
+  int64  expire_hours = 2;  // token 有效期（小时）
+}
+
+// Redis 配置
+message Redis {
+  string addr     = 1;  // redis 地址，如 10.211.55.5:6379
+  string password = 2;  // redis 密码
+  int32  db       = 3;  // redis DB 号
 }
