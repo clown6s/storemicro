@@ -7,6 +7,7 @@ require (
 	github.com/go-kratos/kratos/v2 v2.9.2
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/google/wire v0.7.0
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	go.etcd.io/etcd/client/v3 v3.6.11
 	go.uber.org/zap v1.28.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20260504160031-60b97b32f348
@@ -26,7 +27,6 @@ require (
 	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
-	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect
 	go.etcd.io/etcd/api/v3 v3.6.11 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.6.11 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
