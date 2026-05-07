@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        v7.34.1
-// source: api/product/v1/product.proto
+// source: api/product/v1/district.proto
 
 package productv1
 
@@ -330,7 +330,7 @@ var File_api_product_v1_product_proto protoreflect.FileDescriptor
 
 const file_api_product_v1_product_proto_rawDesc = "" +
 	"\n" +
-	"\x1capi/product/v1/product.proto\x12\x0eapi.product.v1\x1a\x1cgoogle/api/annotations.proto\"\t\n" +
+	"\x1capi/product/v1/district.proto\x12\x0eapi.product.v1\x1a\x1cgoogle/api/annotations.proto\"\t\n" +
 	"\aPingReq\"$\n" +
 	"\bPingResp\x12\x18\n" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"\x1f\n" +

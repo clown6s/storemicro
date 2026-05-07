@@ -153,6 +153,30 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 	return token, user, nil
 }
 
+// Logout 用户登出（根据 token 删除 Redis 中的 token 双映射）
+func (uc *UserUsecase) Logout(ctx context.Context, token string) error {
+	if token == "" {
+		return errors.New("token is required")
+	}
+
+	// 从 Redis 查 userID
+	userID, err := uc.redis.GetUserIDByToken(ctx, token)
+	if err != nil {
+		zap.L().Warn("logout: token not found in redis", zap.Error(err))
+		// token 已不存在，视为已登出
+		return nil
+	}
+
+	// 删除 token 双映射
+	if err := uc.redis.DeleteToken(ctx, token, userID); err != nil {
+		zap.L().Error("logout: delete token failed", zap.Int64("userID", userID), zap.Error(err))
+		return err
+	}
+
+	zap.L().Info("user logged out", zap.Int64("userID", userID))
+	return nil
+}
+
 // ListUsers 用户列表（分页）
 func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32, phone, name string) ([]*User, int64, error) {
 	// 创建自定义埋点 span

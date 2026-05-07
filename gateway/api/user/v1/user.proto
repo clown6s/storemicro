@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package api.user.v1;
 
-option go_package = "gateway/api/user/v1;userv1";
+option go_package = "user/api/user/v1;userv1";
 
 import "google/api/annotations.proto";
 
@@ -30,6 +30,13 @@ service User {
   rpc ListUsers (ListUsersReq) returns (ListUsersResp) {
     option (google.api.http) = {
       get: "/api/v1/user/list"
+    };
+  }
+  // 用户登出
+  rpc Logout (LogoutReq) returns (LogoutResp) {
+    option (google.api.http) = {
+      post: "/api/v1/user/logout"
+      body: "*"
     };
   }
 }
@@ -97,4 +104,13 @@ message ListUsersResp {
   int64          total     = 2;
   int32          page      = 3;
   int32          pageSize = 4;
+}
+
+// 登出
+message LogoutReq {
+  string token = 1;
+}
+
+message LogoutResp {
+  string message = 1;
 }

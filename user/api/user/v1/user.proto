@@ -32,6 +32,13 @@ service User {
       get: "/api/v1/user/list"
     };
   }
+  // 用户登出
+  rpc Logout (LogoutReq) returns (LogoutResp) {
+    option (google.api.http) = {
+      post: "/api/v1/user/logout"
+      body: "*"
+    };
+  }
 }
 
 message GetUserReq {
@@ -97,4 +104,13 @@ message ListUsersResp {
   int64          total     = 2;
   int32          page      = 3;
   int32          pageSize = 4;
+}
+
+// 登出
+message LogoutReq {
+  string token = 1;
+}
+
+message LogoutResp {
+  string message = 1;
 }

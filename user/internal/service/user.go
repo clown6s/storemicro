@@ -85,6 +85,20 @@ func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.
 	}, nil
 }
 
+// Logout 用户登出
+func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv1.LogoutResp, error) {
+	zap.L().Info("Logout called")
+
+	if err := s.uc.Logout(ctx, req.Token); err != nil {
+		zap.L().Warn("Logout failed", zap.Error(err))
+		return nil, s.mapError(err)
+	}
+
+	return &userv1.LogoutResp{
+		Message: "logged out",
+	}, nil
+}
+
 // ListUsers 用户列表（分页）
 func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (*userv1.ListUsersResp, error) {
 	zap.L().Info("ListUsers called",
