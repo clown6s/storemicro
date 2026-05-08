@@ -170,6 +170,7 @@ func (s *UserService) mapError(err error) error {
 		errors.Is(err, biz.ErrTokenRequired),
 		errors.Is(err, biz.ErrInvalidPhone),
 		errors.Is(err, biz.ErrInvalidEmail),
+		errors.Is(err, biz.ErrPasswordTooShort),
 		errors.Is(err, biz.ErrPasswordTooLong):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:

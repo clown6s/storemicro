@@ -10,7 +10,6 @@ import (
 	validate "github.com/go-kratos/kratos/contrib/middleware/validate/v2"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware/logging"
-	"github.com/go-kratos/kratos/v2/middleware/ratelimit"
 	"github.com/go-kratos/kratos/v2/middleware/recovery"
 	"github.com/go-kratos/kratos/v2/middleware/tracing"
 	"github.com/go-kratos/kratos/v2/transport/grpc"
@@ -22,10 +21,6 @@ var ProviderSet = wire.NewSet(NewGRPCServer)
 
 // NewGRPCServer 创建 gRPC 服务器
 func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.ProductService) *grpc.Server {
-	qps := c.Grpc.Qps
-	if qps <= 0 {
-		qps = 100
-	}
 	timeout := 3 * time.Second
 	if t := c.Grpc.Timeout; t != nil {
 		timeout = t.AsDuration()
@@ -38,7 +33,6 @@ func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.ProductServic
 			tracing.Server(),
 			logging.Server(logger),
 			validate.ProtoValidate(),
-			ratelimit.Server(ratelimit.WithLimiter(newTokenLimiter(qps))),
 		),
 	}
 	srv := grpc.NewServer(opts...)

@@ -51,6 +51,10 @@ func (j *JWT) ExpireHours() time.Duration {
 // ParseToken 解析并验证 JWT token
 func (j *JWT) ParseToken(tokenStr string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
+		// 校验签名算法，防止 none 算法伪造 token
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
 		return j.secret, nil
 	})
 	if err != nil {

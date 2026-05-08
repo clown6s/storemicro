@@ -17,6 +17,9 @@ version: v1
 # 服务器配置
 server:
   addr: :8080
+  allow_origins:
+    - "http://localhost:3000"
+    - "http://127.0.0.1:3000"
 
 # etcd 服务发现
 etcd:

@@ -36,6 +36,7 @@ var (
 	ErrEncryptPassword  = errors.New("password encryption failed")
 	ErrInvalidPhone     = errors.New("invalid phone format")
 	ErrInvalidEmail     = errors.New("invalid email format")
+	ErrPasswordTooShort = errors.New("password too short (min 6)")
 	ErrPasswordTooLong  = errors.New("password too long (max 72 bytes)")
 )
 
@@ -98,7 +99,7 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 		return ErrPasswordRequired
 	}
 	if len(user.Password) < 6 {
-		return errors.New("password too short (min 6)")
+		return ErrPasswordTooShort
 	}
 	if len(user.Password) > 72 {
 		return ErrPasswordTooLong
@@ -244,7 +245,8 @@ func (uc *UserUsecase) Update(ctx context.Context, user *User) error {
 	if user.ID <= 0 {
 		return ErrInvalidUserID
 	}
-	if user.RealName == "" && user.Email == "" && user.Avatar == "" {
+	if user.RealName == "" && user.Email == "" && user.Avatar == "" &&
+		user.Gender == 0 && user.Age == 0 && user.Remark == "" {
 		return ErrNothingToUpdate
 	}
 	err := uc.repo.Update(ctx, user)

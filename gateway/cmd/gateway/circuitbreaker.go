@@ -5,8 +5,6 @@ import (
 
 	"github.com/sony/gobreaker"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 // circuitBreakerSettings 熔断器配置（SRE 风格：失败率超过 50% 则熔断）
@@ -34,19 +32,5 @@ func circuitBreakerUnaryInterceptor() grpc.UnaryClientInterceptor {
 			return nil, invoker(ctx, method, req, reply, cc, opts...)
 		})
 		return err
-	}
-}
-
-// isRetryable 判断 gRPC 错误是否可重试（用于熔断失败率统计）
-func isRetryable(err error) bool {
-	st, ok := status.FromError(err)
-	if !ok {
-		return true // 无法解析，默认计为失败
-	}
-	switch st.Code() {
-	case codes.Unavailable, codes.Internal, codes.DeadlineExceeded, codes.ResourceExhausted:
-		return true
-	default:
-		return false
 	}
 }
