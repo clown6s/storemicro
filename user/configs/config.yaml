@@ -23,7 +23,7 @@ registry:
 
 # JWT 配置（生产环境通过 JWT_SECRET 环境变量注入）
 jwt:
-  secret: "${JWT_SECRET:store-micro-jwt-secret-2026}"
+  secret: store-micro-jwt-secret-2026-production
   expire_hours: 24
 
 # Redis 配置

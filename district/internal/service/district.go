@@ -31,7 +31,7 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 	districts, err := d.uc.Get(ctx, req.AdCode)
 	if err != nil {
 		zap.L().Error("GetProvinceTree failed", zap.String("adCode", req.AdCode), zap.Error(err))
-		return nil, status.Errorf(codes.Internal, "query district failed: %v", err)
+		return nil, status.Error(codes.Internal, "internal error")
 	}
 	if len(districts) == 0 {
 		return nil, status.Errorf(codes.NotFound, "district not found: %s", req.AdCode)

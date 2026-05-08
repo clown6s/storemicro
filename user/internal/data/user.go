@@ -64,7 +64,7 @@ func (r *userRepo) Get(ctx context.Context, id int64) (*biz.User, error) {
 		} else {
 			zap.L().Error("userRepo.Get failed", zap.Int64("id", id), zap.Error(err))
 		}
-		return nil, errors.New("user not found")
+		return nil, biz.ErrUserNotFound
 	}
 	return user, nil
 }
@@ -86,7 +86,7 @@ func (r *userRepo) GetByPhone(ctx context.Context, phone string) (*biz.User, err
 		} else {
 			zap.L().Error("userRepo.GetByPhone failed", zap.String("phone", phone), zap.Error(err))
 		}
-		return nil, errors.New("user not found")
+		return nil, biz.ErrUserNotFound
 	}
 	return user, nil
 }
@@ -152,7 +152,7 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 		users = append(users, user)
 	}
 
-	return users, total, nil
+	return users, total, rows.Err()
 }
 
 func (r *userRepo) Update(ctx context.Context, user *biz.User) error {
@@ -177,6 +177,7 @@ func (r *userRepo) Update(ctx context.Context, user *biz.User) error {
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		zap.L().Warn("userRepo.Update no rows affected", zap.Int64("id", user.ID))
+		return biz.ErrUserNotFound
 	}
 	return nil
 }
@@ -184,14 +185,18 @@ func (r *userRepo) Update(ctx context.Context, user *biz.User) error {
 func (r *userRepo) Delete(ctx context.Context, id int64) error {
 	zap.L().Debug("userRepo.Delete", zap.Int64("id", id))
 
-	// 逻辑删除：记录删除时间，使用 RFC3339 格式时间戳
-	_, err := r.data.db.ExecContext(ctx,
-		`UPDATE user SET deleted_at = ? WHERE id = ?`,
+	result, err := r.data.db.ExecContext(ctx,
+		`UPDATE user SET deleted_at = ? WHERE id = ? AND (deleted_at IS NULL OR deleted_at = '')`,
 		time.Now().UTC().Format(time.RFC3339), id,
 	)
 	if err != nil {
 		zap.L().Error("userRepo.Delete failed", zap.Int64("id", id), zap.Error(err))
 		return err
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return biz.ErrUserNotFound
 	}
 
 	zap.L().Info("userRepo.Delete success", zap.Int64("id", id))

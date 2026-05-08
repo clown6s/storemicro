@@ -84,7 +84,11 @@ func (r *productRepo) Create(ctx context.Context, p *biz.Product) (int64, error)
 		return 0, err
 	}
 
-	id, _ := result.LastInsertId()
+	id, err := result.LastInsertId()
+	if err != nil {
+		zap.L().Error("productRepo.Create LastInsertId failed", zap.Error(err))
+		return 0, err
+	}
 	zap.L().Info("productRepo.Create success", zap.Int64("id", id))
 	return id, nil
 }
@@ -104,6 +108,7 @@ func (r *productRepo) Update(ctx context.Context, p *biz.Product) error {
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
 		zap.L().Warn("productRepo.Update no rows affected", zap.Int64("id", p.ID))
+		return biz.ErrProductNotFound
 	}
 	return nil
 }
@@ -111,10 +116,15 @@ func (r *productRepo) Update(ctx context.Context, p *biz.Product) error {
 func (r *productRepo) Delete(ctx context.Context, id int64) error {
 	zap.L().Debug("productRepo.Delete", zap.Int64("id", id))
 
-	_, err := r.data.db.ExecContext(ctx, "DELETE FROM products WHERE id = ?", id)
+	result, err := r.data.db.ExecContext(ctx, "DELETE FROM products WHERE id = ?", id)
 	if err != nil {
 		zap.L().Error("productRepo.Delete failed", zap.Int64("id", id), zap.Error(err))
 		return err
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return biz.ErrProductNotFound
 	}
 
 	zap.L().Info("productRepo.Delete success", zap.Int64("id", id))

@@ -167,9 +167,13 @@ func (s *UserService) mapError(err error) error {
 		errors.Is(err, biz.ErrPasswordRequired),
 		errors.Is(err, biz.ErrNothingToUpdate),
 		errors.Is(err, biz.ErrWrongCredentials),
-		errors.Is(err, biz.ErrTokenRequired):
+		errors.Is(err, biz.ErrTokenRequired),
+		errors.Is(err, biz.ErrInvalidPhone),
+		errors.Is(err, biz.ErrInvalidEmail),
+		errors.Is(err, biz.ErrPasswordTooLong):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:
-		return status.Error(codes.Internal, err.Error())
+		zap.L().Error("unexpected user error", zap.Error(err))
+		return status.Error(codes.Internal, "internal error")
 	}
 }

@@ -30,7 +30,7 @@ log:
 # JWT 认证（与 user 服务保持一致的 secret）
 # 生产环境必须通过环境变量 JWT_SECRET 注入，此处仅为占位
 jwt:
-  secret: "${JWT_SECRET:store-micro-jwt-secret-2026}"
+  secret: "${JWT_SECRET:store-micro-jwt-secret-2026-production}"
 
 # Redis（用于 token 校验，支持单设备登录踢人）
 redis:

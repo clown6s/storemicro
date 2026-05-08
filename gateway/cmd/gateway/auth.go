@@ -50,8 +50,6 @@ var noAuthPrefixes = []string{
 	"/api/v1/user/login",
 	"/api/v1/user/ping",
 	"/api/v1/product/ping",
-	"/api/v1/district/provinceTree",
-	"/api/v1/district/",
 	"/healthz",
 }
 
@@ -101,10 +99,9 @@ func jwtAuth(secret string, rdb *redis.Client, next http.Handler) http.Handler {
 		}
 
 		// 支持 Bearer 前缀（大小写不敏感）
-		tokenStr := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
-		if tokenStr == authHeader {
-			// 没有 Bearer 前缀也接受原始值
-			tokenStr = authHeader
+		tokenStr := authHeader
+		if len(authHeader) > 7 && strings.EqualFold(authHeader[:7], "Bearer ") {
+			tokenStr = strings.TrimSpace(authHeader[7:])
 		}
 
 		// 1) 解析并校验 JWT 签名

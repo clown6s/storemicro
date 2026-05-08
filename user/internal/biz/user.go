@@ -3,6 +3,7 @@ package biz
 import (
 	"context"
 	"errors"
+	"regexp"
 
 	"user/internal/pkg/jwt"
 	"user/internal/pkg/redis"
@@ -33,6 +34,15 @@ var (
 	ErrGenerateToken    = errors.New("generate token failed")
 	ErrStoreToken       = errors.New("store token failed")
 	ErrEncryptPassword  = errors.New("password encryption failed")
+	ErrInvalidPhone     = errors.New("invalid phone format")
+	ErrInvalidEmail     = errors.New("invalid email format")
+	ErrPasswordTooLong  = errors.New("password too long (max 72 bytes)")
+)
+
+// 手机号和邮箱格式正则
+var (
+	phoneRegex = regexp.MustCompile(`^1[3-9]\d{9}$`)
+	emailRegex = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
 )
 
 // User 领域模型（对应数据库 user 表全部字段）
@@ -83,15 +93,24 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 		zap.L().Warn("validation failed", zap.String("method", "Register"), zap.String("reason", "phone is required"))
 		return ErrPhoneRequired
 	}
+	if !phoneRegex.MatchString(user.Phone) {
+		return ErrInvalidPhone
+	}
 	if user.Password == "" {
 		zap.L().Warn("validation failed", zap.String("method", "Register"), zap.String("reason", "password is required"))
 		return ErrPasswordRequired
 	}
-	if len(user.Phone) > 20 {
-		return errors.New("phone too long")
-	}
 	if len(user.Password) < 6 {
 		return errors.New("password too short (min 6)")
+	}
+	if len(user.Password) > 72 {
+		return ErrPasswordTooLong
+	}
+	if user.Email != "" && !emailRegex.MatchString(user.Email) {
+		return ErrInvalidEmail
+	}
+	if len(user.Phone) > 20 {
+		return ErrInvalidPhone
 	}
 
 	// bcrypt 加密密码

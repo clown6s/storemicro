@@ -73,7 +73,7 @@ func main() {
 	// 启动 HTTP 服务器（非阻塞）
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			zapLog.Fatal("gateway error", zap.Error(err))
+			zapLog.Error("gateway error", zap.Error(err))
 		}
 	}()
 
