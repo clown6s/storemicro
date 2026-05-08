@@ -14,7 +14,7 @@ type Redis struct {
 }
 
 // NewRedis 创建 Redis 客户端（带连接池、超时、重试配置）
-func NewRedis(addr, password string, db int) *Redis {
+func NewRedis(addr, password string, db int) (*Redis, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:         addr,
 		Password:     password,
@@ -30,9 +30,9 @@ func NewRedis(addr, password string, db int) *Redis {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
-		panic("failed to connect redis: " + err.Error())
+		return nil, fmt.Errorf("failed to connect redis: %w", err)
 	}
-	return &Redis{client: client}
+	return &Redis{client: client}, nil
 }
 
 // SetToken 存储 token（登录成功后将 token -> userID 写入 Redis，设置过期时间）

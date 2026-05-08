@@ -39,7 +39,8 @@ func main() {
 		SampleRate:  appCfg.Tracing.SampleRate,
 	})
 	if err != nil {
-		zapLog.Fatal("failed to init jaeger tracer", zap.Error(err))
+		zapLog.Error("failed to init jaeger tracer", zap.Error(err))
+		os.Exit(1)
 	}
 	defer func() {
 		if err := shutdown(context.Background()); err != nil {
@@ -50,7 +51,8 @@ func main() {
 	// 创建 grpc-gateway 代理
 	proxy, err := NewGatewayProxy(appCfg)
 	if err != nil {
-		zapLog.Fatal("failed to create gateway proxy", zap.Error(err))
+		zapLog.Error("failed to create gateway proxy", zap.Error(err))
+		os.Exit(1)
 	}
 	defer proxy.Close()
 

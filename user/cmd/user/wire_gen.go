@@ -22,7 +22,10 @@ import (
 
 func wireApp(confServer *conf.Server, confData *conf.Data, confJwt *conf.Jwt, confRedis *conf.Redis, logger log.Logger, reg registry.Registrar) (*kratos.App, func(), error) {
 	// Redis
-	r := redis.NewRedis(confRedis.Addr, confRedis.Password, int(confRedis.Db))
+	r, err := redis.NewRedis(confRedis.Addr, confRedis.Password, int(confRedis.Db))
+	if err != nil {
+		return nil, nil, err
+	}
 
 	// Data（数据库 + Redis）
 	dataData, cleanup, err := data.NewData(confData, r, logger)

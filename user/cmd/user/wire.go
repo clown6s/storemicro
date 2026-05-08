@@ -33,6 +33,6 @@ func newJWT(c *conf.Jwt) *jwt.JWT {
 	return jwt.NewJWT(c.Secret, c.ExpireHours)
 }
 
-func newRedis(c *conf.Redis) *redis.Redis {
+func newRedis(c *conf.Redis) (*redis.Redis, error) {
 	return redis.NewRedis(c.Addr, c.Password, int(c.Db))
 }
