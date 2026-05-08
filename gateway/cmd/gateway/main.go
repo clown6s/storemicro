@@ -35,7 +35,8 @@ func main() {
 	// 初始化链路追踪（OTLP gRPC → Jaeger）
 	shutdown, err := pkgtracing.InitTracer(pkgtracing.Conf{
 		ServiceName: "storemicro-gateway",
-		Endpoint:    "10.211.55.5:4317",
+		Endpoint:    appCfg.Tracing.Endpoint,
+		SampleRate:  appCfg.Tracing.SampleRate,
 	})
 	if err != nil {
 		zapLog.Fatal("failed to init jaeger tracer", zap.Error(err))

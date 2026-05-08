@@ -1,6 +1,8 @@
 package server
 
 import (
+	"time"
+
 	productv1 "product/api/product/v1"
 	"product/internal/conf"
 	"product/internal/service"
@@ -20,14 +22,23 @@ var ProviderSet = wire.NewSet(NewGRPCServer)
 
 // NewGRPCServer 创建 gRPC 服务器
 func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.ProductService) *grpc.Server {
+	qps := c.Grpc.Qps
+	if qps <= 0 {
+		qps = 100
+	}
+	timeout := 3 * time.Second
+	if t := c.Grpc.Timeout; t != nil {
+		timeout = t.AsDuration()
+	}
 	opts := []grpc.ServerOption{
 		grpc.Address(c.Grpc.Addr),
+		grpc.Timeout(timeout),
 		grpc.Middleware(
 			recovery.Recovery(),
 			tracing.Server(),
 			logging.Server(logger),
 			validate.ProtoValidate(),
-			ratelimit.Server(),
+			ratelimit.Server(ratelimit.WithLimiter(newTokenLimiter(qps))),
 		),
 	}
 	srv := grpc.NewServer(opts...)

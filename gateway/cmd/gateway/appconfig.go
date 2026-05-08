@@ -9,13 +9,20 @@ import (
 
 // AppConfig 应用配置（从 config.yaml 读取）
 type AppConfig struct {
-	Name    string       `yaml:"name"`
-	Version string       `yaml:"version"`
-	Server  ServerConfig `yaml:"server"`
-	Etcd    EtcdConfig   `yaml:"etcd"`
-	Jwt     JwtConfig    `yaml:"jwt"`
-	Redis   RedisConfig  `yaml:"redis"`
-	Log     LogConfig    `yaml:"log"`
+	Name    string        `yaml:"name"`
+	Version string        `yaml:"version"`
+	Server  ServerConfig  `yaml:"server"`
+	Etcd    EtcdConfig    `yaml:"etcd"`
+	Jwt     JwtConfig     `yaml:"jwt"`
+	Redis   RedisConfig   `yaml:"redis"`
+	Log     LogConfig     `yaml:"log"`
+	Tracing TracingConfig `yaml:"tracing"`
+}
+
+// TracingConfig 链路追踪配置
+type TracingConfig struct {
+	Endpoint   string  `yaml:"endpoint"`
+	SampleRate float64 `yaml:"sample_rate"`
 }
 
 // ServerConfig 服务配置

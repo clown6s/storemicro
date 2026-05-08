@@ -83,15 +83,28 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		discovery.PrintDebugLog(false),
 	)
 
-	// gRPC 连接选项（keepalive 保活 + otel 追踪）
+	// gRPC 连接选项（keepalive 保活 + otel 追踪 + retry 重试）
 	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithResolvers(discoveryBuilder),
-		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
+		grpc.WithDefaultServiceConfig(`{
+			"loadBalancingPolicy":"round_robin",
+			"methodConfig": [{
+				"name": [{}],
+				"retryPolicy": {
+					"maxAttempts": 3,
+					"initialBackoff": "0.1s",
+					"maxBackoff": "1s",
+					"backoffMultiplier": 2.0,
+					"retryableStatusCodes": ["UNAVAILABLE", "INTERNAL", "RESOURCE_EXHAUSTED"]
+				}
+			}]
+		}`),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithUnaryInterceptor(circuitBreakerUnaryInterceptor()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                20 * time.Second, // 20s 无活动则发 ping
-			Timeout:             5 * time.Second,  // ping 超时 5s
+			Time:                20 * time.Second,
+			Timeout:             5 * time.Second,
 			PermitWithoutStream: true,
 		}),
 	}

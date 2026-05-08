@@ -7,24 +7,34 @@ option go_package = "district/internal/conf;conf";
 import "google/protobuf/duration.proto";
 
 message Bootstrap {
-  Server server = 1;
-  Data data = 2;
-  Logger logger = 3;
+  Server   server   = 1;
+  Data     data     = 2;
+  Logger   logger   = 3;
   Registry registry = 4;
+  Tracing  tracing  = 5;
+}
+
+message Tracing {
+  string endpoint   = 1;
+  double sample_rate = 2;
 }
 
 message Server {
   message GRPC {
     string addr = 1;
     google.protobuf.Duration timeout = 2;
+    int64  qps  = 3;
   }
   GRPC grpc = 1;
 }
 
 message Data {
   message Database {
-    string driver = 1;
-    string source = 2;
+    string  driver          = 1;
+    string  source          = 2;
+    int64   max_open_conns  = 3;
+    int64   max_idle_conns  = 4;
+    int64   conn_max_lifetime = 5;
   }
   Database database = 1;
 }

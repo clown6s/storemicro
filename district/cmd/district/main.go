@@ -12,6 +12,7 @@ import (
 
 	"district/internal/conf"
 	zaplog "district/internal/pkg/log"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	pkgtracing "github.com/storemicro/pkg/tracing"
 
 	etcd2 "github.com/go-kratos/kratos/contrib/registry/etcd/v2"
@@ -29,10 +30,19 @@ var (
 	Version string
 )
 
+// init 在 flag.Parse() 之前注册 -conf 标志
+var confPath string
+
+func init() {
+	flag.StringVar(&confPath, "conf", "", "config path, eg: -conf config.yaml")
+}
+
 func main() {
 	flag.Parse()
 
-	confPath := flagconf()
+	if confPath == "" {
+		confPath = resolveConfDir()
+	}
 
 	c := config.New(
 		config.WithSource(
@@ -65,7 +75,8 @@ func main() {
 	// 初始化链路追踪（OTLP gRPC → Jaeger）
 	shutdown, err := pkgtracing.InitTracer(pkgtracing.Conf{
 		ServiceName: "storemicro-" + Name,
-		Endpoint:    "10.211.55.5:4317",
+		Endpoint:    bc.Tracing.Endpoint,
+		SampleRate:  bc.Tracing.SampleRate,
 	})
 	if err != nil {
 		helper.Errorf("failed to init jaeger tracer: %v", err)
@@ -102,33 +113,27 @@ func main() {
 	// 健康检查 HTTP sidecar（:9103）
 	go startHealthServer(":9103", helper)
 
+	// 启动服务（阻塞，内部监听信号并优雅退出）
 	if err := app.Run(); err != nil {
-		helper.Errorf("service stopped with error: %v", err)
+		helper.Errorf("failed to run app: %v", err)
 		os.Exit(1)
 	}
-
-	helper.Infow("msg", "service stopped", "name", Name)
 }
 
-func flagconf() string {
-	var c string
-	flag.StringVar(&c, "conf", "", "config path, eg: -conf config.yaml")
-	if c == "" {
-		exe, _ := os.Executable()
-		exeDir := filepath.Dir(exe)
-		candidates := []string{
-			filepath.Join(exeDir, "configs"),
-			filepath.Join(exeDir, "..", "configs"),
-			filepath.Join("configs"),
-		}
-		for _, p := range candidates {
-			if info, err := os.Stat(p); err == nil && info.IsDir() {
-				return p
-			}
-		}
-		c = candidates[0]
+func resolveConfDir() string {
+	exe, _ := os.Executable()
+	exeDir := filepath.Dir(exe)
+	candidates := []string{
+		filepath.Join(exeDir, "configs"),
+		filepath.Join(exeDir, "..", "configs"),
+		filepath.Join("configs"),
 	}
-	return c
+	for _, p := range candidates {
+		if info, err := os.Stat(p); err == nil && info.IsDir() {
+			return p
+		}
+	}
+	return candidates[0]
 }
 
 func newApp(logger log.Logger, gs *grpc.Server, reg registry.Registrar) *kratos.App {
@@ -142,7 +147,7 @@ func newApp(logger log.Logger, gs *grpc.Server, reg registry.Registrar) *kratos.
 	)
 }
 
-// startHealthServer 启动轻量级健康检查 HTTP 服务器
+// startHealthServer 启动轻量级健康检查 HTTP 服务器（含 Prometheus metrics）
 func startHealthServer(addr string, helper *log.Helper) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -150,6 +155,7 @@ func startHealthServer(addr string, helper *log.Helper) {
 		w.WriteHeader(http.StatusOK)
 		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": Name})
 	})
+	mux.Handle("/metrics", promhttp.Handler())
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      mux,

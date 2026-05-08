@@ -3,14 +3,17 @@ module district
 go 1.26.1
 
 require (
+	github.com/go-kratos/aegis v0.2.0
 	github.com/go-kratos/kratos/contrib/middleware/validate/v2 v2.0.0-20260404020628-f149714c1d54
 	github.com/go-kratos/kratos/contrib/registry/etcd/v2 v2.0.0-20260404020628-f149714c1d54
 	github.com/go-kratos/kratos/v2 v2.9.2
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/google/wire v0.7.0
+	github.com/prometheus/client_golang v1.20.5
 	github.com/storemicro/pkg/tracing v0.0.0
 	go.etcd.io/etcd/client/v3 v3.6.11
 	go.uber.org/zap v1.28.0
+	golang.org/x/time v0.15.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20260504160031-60b97b32f348
 	google.golang.org/grpc v1.81.0
 	google.golang.org/protobuf v1.36.11
@@ -23,12 +26,12 @@ require (
 	dario.cat/mergo v1.0.0 // indirect
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/antlr4-go/antlr/v4 v4.13.1 // indirect
+	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cenkalti/backoff/v5 v5.0.3 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/coreos/go-semver v0.3.1 // indirect
 	github.com/coreos/go-systemd/v22 v22.5.0 // indirect
 	github.com/fsnotify/fsnotify v1.6.0 // indirect
-	github.com/go-kratos/aegis v0.2.0 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
@@ -39,8 +42,13 @@ require (
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0 // indirect
+	github.com/klauspost/compress v1.17.9 // indirect
 	github.com/lufia/plan9stats v0.0.0-20230326075908-cb1d2100619a // indirect
+	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/power-devops/perfstat v0.0.0-20221212215047-62379fc7944b // indirect
+	github.com/prometheus/client_model v0.6.1 // indirect
+	github.com/prometheus/common v0.62.0 // indirect
+	github.com/prometheus/procfs v0.15.1 // indirect
 	github.com/shirou/gopsutil/v3 v3.23.6 // indirect
 	github.com/shoenig/go-m1cpu v0.1.6 // indirect
 	github.com/stoewer/go-strcase v1.3.0 // indirect

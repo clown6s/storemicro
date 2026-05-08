@@ -9,6 +9,7 @@ require (
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0
 	github.com/prometheus/client_golang v1.20.5
 	github.com/redis/go-redis/v9 v9.19.0
+	github.com/sony/gobreaker v1.0.0
 	github.com/storemicro/pkg/tracing v0.0.0
 	go.etcd.io/etcd/client/v3 v3.6.11
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.68.0

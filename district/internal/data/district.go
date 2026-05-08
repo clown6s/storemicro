@@ -36,7 +36,7 @@ WITH RECURSIVE district_tree AS (
 SELECT id, parent_adcode, adcode, name, level, center FROM district_tree`
 		args = append(args, adCode)
 	} else {
-		query = `SELECT id, parent_adcode, adcode, name, level, center FROM district`
+		query = `SELECT id, parent_adcode, adcode, name, level, center FROM district WHERE level != 'country'`
 	}
 
 	rows, err := d.data.db.QueryContext(ctx, query, args...)
