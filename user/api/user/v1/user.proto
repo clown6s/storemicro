@@ -97,12 +97,10 @@ message LoginResp {
 
 // 用户列表（分页）
 message ListUsersReq {
-  uint32 code = 1;
-  string message =2;
-  int32 page      = 3;
-  int32 pageSize = 4;
-  string phone = 5;
-  string name = 6;
+  int32  page     = 1;
+  int32  pageSize = 2;
+  string phone    = 3;
+  string name     = 4;
 }
 
 message ListUsersResp {

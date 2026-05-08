@@ -10,6 +10,7 @@ import (
 	"github.com/google/wire"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
@@ -17,6 +18,22 @@ import (
 
 // ProviderSet is biz providers.
 var ProviderSet = wire.NewSet(NewUserUsecase)
+
+// 统一错误变量，避免业务逻辑散落字符串字面量
+var (
+	ErrUserNotFound     = errors.New("user not found")
+	ErrPhoneRequired    = errors.New("phone is required")
+	ErrPasswordRequired = errors.New("password is required")
+	ErrPhoneExists      = errors.New("phone already exists")
+	ErrEmailExists      = errors.New("email already exists")
+	ErrInvalidUserID    = errors.New("invalid user id")
+	ErrNothingToUpdate  = errors.New("nothing to update")
+	ErrWrongCredentials = errors.New("phone or password incorrect")
+	ErrTokenRequired    = errors.New("token is required")
+	ErrGenerateToken    = errors.New("generate token failed")
+	ErrStoreToken       = errors.New("store token failed")
+	ErrEncryptPassword  = errors.New("password encryption failed")
+)
 
 // User 领域模型（对应数据库 user 表全部字段）
 type User struct {
@@ -63,11 +80,17 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	// 参数校验
 	if user.Phone == "" {
 		zap.L().Warn("validation failed", zap.String("method", "Register"), zap.String("reason", "phone is required"))
-		return errors.New("phone is required")
+		return ErrPhoneRequired
 	}
 	if user.Password == "" {
 		zap.L().Warn("validation failed", zap.String("method", "Register"), zap.String("reason", "password is required"))
-		return errors.New("password is required")
+		return ErrPasswordRequired
+	}
+	if len(user.Phone) > 20 {
+		return errors.New("phone too long")
+	}
+	if len(user.Password) < 6 {
+		return errors.New("password too short (min 6)")
 	}
 
 	// 手机号唯一性
@@ -78,7 +101,7 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	}
 	if exists {
 		zap.L().Warn("phone already exists", zap.String("phone", user.Phone))
-		return errors.New("phone already exists")
+		return ErrPhoneExists
 	}
 
 	// 邮箱唯一性（如果提供了邮箱）
@@ -90,7 +113,7 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 		}
 		if exists {
 			zap.L().Warn("email already exists", zap.String("email", user.Email))
-			return errors.New("email already exists")
+			return ErrEmailExists
 		}
 	}
 
@@ -98,7 +121,7 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
 		zap.L().Error("bcrypt hash failed", zap.Error(err))
-		return errors.New("password encryption failed")
+		return ErrEncryptPassword
 	}
 	user.Password = string(hashedPwd)
 
@@ -116,37 +139,37 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 // Login 用户登录（手机号+密码），返回 JWT token 和用户信息
 func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (string, *User, error) {
 	if phone == "" {
-		return "", nil, errors.New("phone is required")
+		return "", nil, ErrPhoneRequired
 	}
 	if password == "" {
-		return "", nil, errors.New("password is required")
+		return "", nil, ErrPasswordRequired
 	}
 
 	// 查找用户
 	user, err := uc.repo.GetByPhone(ctx, phone)
 	if err != nil {
 		zap.L().Warn("login failed: user not found", zap.String("phone", phone), zap.Error(err))
-		return "", nil, errors.New("phone or password incorrect")
+		return "", nil, ErrWrongCredentials
 	}
 
 	// 验证密码
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
 		zap.L().Warn("login failed: password incorrect", zap.String("phone", phone))
-		return "", nil, errors.New("phone or password incorrect")
+		return "", nil, ErrWrongCredentials
 	}
 
 	// 生成 JWT token
 	token, err := uc.jwt.GenerateToken(user.ID, user.Phone)
 	if err != nil {
 		zap.L().Error("generate token failed", zap.Int64("id", user.ID), zap.Error(err))
-		return "", nil, errors.New("generate token failed")
+		return "", nil, ErrGenerateToken
 	}
 
 	// 将 token 存入 Redis（与 JWT 过期时间一致）
 	expireHours := uc.jwt.ExpireHours()
 	if err := uc.redis.SetToken(ctx, token, user.ID, expireHours); err != nil {
 		zap.L().Error("store token to redis failed", zap.Int64("id", user.ID), zap.Error(err))
-		return "", nil, errors.New("store token failed")
+		return "", nil, ErrStoreToken
 	}
 
 	zap.L().Info("user logged in", zap.Int64("id", user.ID), zap.String("phone", phone))
@@ -156,7 +179,7 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 // Logout 用户登出（根据 token 删除 Redis 中的 token 双映射）
 func (uc *UserUsecase) Logout(ctx context.Context, token string) error {
 	if token == "" {
-		return errors.New("token is required")
+		return ErrTokenRequired
 	}
 
 	// 从 Redis 查 userID
@@ -207,27 +230,29 @@ func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32, phon
 	)
 	if err != nil {
 		span.RecordError(err)
+		span.SetStatus(codes.Error, err.Error())
+		return nil, 0, err
 	}
 
-	return users, total, err
+	return users, total, nil
 }
 
 // Get 获取用户
 func (uc *UserUsecase) Get(ctx context.Context, id int64) (*User, error) {
-	if id == 0 {
+	if id <= 0 {
 		zap.L().Warn("validation failed", zap.String("method", "Get"), zap.String("reason", "invalid user id"))
-		return nil, errors.New("invalid user id")
+		return nil, ErrInvalidUserID
 	}
 	return uc.repo.Get(ctx, id)
 }
 
 // Update 更新用户
 func (uc *UserUsecase) Update(ctx context.Context, user *User) error {
-	if user.ID == 0 {
-		return errors.New("invalid user id")
+	if user.ID <= 0 {
+		return ErrInvalidUserID
 	}
 	if user.RealName == "" && user.Email == "" && user.Avatar == "" {
-		return errors.New("nothing to update")
+		return ErrNothingToUpdate
 	}
 	err := uc.repo.Update(ctx, user)
 	if err != nil {
@@ -239,8 +264,8 @@ func (uc *UserUsecase) Update(ctx context.Context, user *User) error {
 
 // Delete 删除用户
 func (uc *UserUsecase) Delete(ctx context.Context, id int64) error {
-	if id == 0 {
-		return nil
+	if id <= 0 {
+		return ErrInvalidUserID
 	}
 	err := uc.repo.Delete(ctx, id)
 	if err != nil {

@@ -17,12 +17,21 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// contextKey 自定义类型用于 context key，避免与其他包的 key 碰撞
+type contextKey string
+
+const (
+	ContextKeyUserID contextKey = "user_id"
+	ContextKeyPhone  contextKey = "phone"
+)
+
 // noAuthPaths 不需要 JWT 校验的路径（登录、注册、健康检查等）
 var noAuthPaths = map[string]bool{
 	"/api/v1/user/register": true,
 	"/api/v1/user/login":    true,
 	"/api/v1/user/ping":     true,
 	"/api/v1/product/ping":  true,
+	"/healthz":              true,
 }
 
 // jwtAuth JWT 认证中间件（JWT 签名校验 + Redis token 有效性校验，支持单设备登录踢人）
@@ -43,18 +52,22 @@ func jwtAuth(secret string, rdb *redis.Client, next http.Handler) http.Handler {
 				zap.String("path", path),
 				zap.String("remote", r.RemoteAddr),
 			)
-			http.Error(w, `{"code":401,"message":"missing token"}`, http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"missing token"}`)
 			return
 		}
 
-		// 支持 Bearer 前缀
-		tokenStr := authHeader
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			tokenStr = strings.TrimPrefix(authHeader, "Bearer ")
+		// 支持 Bearer 前缀（大小写不敏感）
+		tokenStr := strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+		if tokenStr == authHeader {
+			// 没有 Bearer 前缀也接受原始值
+			tokenStr = authHeader
 		}
 
 		// 1) 解析并校验 JWT 签名
 		token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+				return nil, jwt.ErrSignatureInvalid
+			}
 			return []byte(secret), nil
 		})
 		if err != nil || !token.Valid {
@@ -62,13 +75,13 @@ func jwtAuth(secret string, rdb *redis.Client, next http.Handler) http.Handler {
 				zap.String("path", path),
 				zap.Error(err),
 			)
-			http.Error(w, `{"code":401,"message":"invalid token"}`, http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
 			return
 		}
 
 		claims, ok := token.Claims.(*Claims)
 		if !ok {
-			http.Error(w, `{"code":401,"message":"invalid claims"}`, http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid claims"}`)
 			return
 		}
 
@@ -79,7 +92,7 @@ func jwtAuth(secret string, rdb *redis.Client, next http.Handler) http.Handler {
 				zap.String("path", path),
 				zap.Int64("user_id", claims.UserID),
 			)
-			http.Error(w, `{"code":401,"message":"token expired, please re-login"}`, http.StatusUnauthorized)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
 			return
 		} else if err != nil {
 			zapLog.Error("redis check token failed", zap.Error(err))
@@ -88,11 +101,18 @@ func jwtAuth(secret string, rdb *redis.Client, next http.Handler) http.Handler {
 			_ = val // val 是 userID，可按需记录
 		}
 
-		// 将 user_id 写入 context，下游可取用
-		ctx := context.WithValue(r.Context(), "user_id", claims.UserID)
-		ctx = context.WithValue(ctx, "phone", claims.Phone)
+		// 将 user_id / phone 用类型安全的 key 写入 context
+		ctx := context.WithValue(r.Context(), ContextKeyUserID, claims.UserID)
+		ctx = context.WithValue(ctx, ContextKeyPhone, claims.Phone)
 		r = r.WithContext(ctx)
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// writeJSON 统一写入 JSON 错误响应
+func writeJSON(w http.ResponseWriter, code int, body string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(code)
+	_, _ = w.Write([]byte(body))
 }

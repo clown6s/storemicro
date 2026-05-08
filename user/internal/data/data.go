@@ -30,9 +30,10 @@ func NewData(c *conf.Data, r *redis.Redis, logger log.Logger) (*Data, func(), er
 		return nil, nil, err
 	}
 
-	db.SetMaxOpenConns(50)
+	db.SetMaxOpenConns(100)
 	db.SetMaxIdleConns(25)
 	db.SetConnMaxLifetime(time.Hour)
+	db.SetConnMaxIdleTime(30 * time.Minute)
 
 	if err := db.PingContext(context.Background()); err != nil {
 		return nil, nil, err

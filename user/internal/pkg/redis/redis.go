@@ -13,15 +13,22 @@ type Redis struct {
 	client *redis.Client
 }
 
-// NewRedis 创建 Redis 客户端
+// NewRedis 创建 Redis 客户端（带连接池、超时、重试配置）
 func NewRedis(addr, password string, db int) *Redis {
 	client := redis.NewClient(&redis.Options{
-		Addr:     addr,
-		Password: password,
-		DB:       db,
+		Addr:         addr,
+		Password:     password,
+		DB:           db,
+		PoolSize:     20,
+		MinIdleConns: 5,
+		DialTimeout:  3 * time.Second,
+		ReadTimeout:  2 * time.Second,
+		WriteTimeout: 2 * time.Second,
+		MaxRetries:   3,
 	})
 	// 验证连接
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	if err := client.Ping(ctx).Err(); err != nil {
 		panic("failed to connect redis: " + err.Error())
 	}

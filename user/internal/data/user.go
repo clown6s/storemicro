@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"user/internal/biz"
 	"user/internal/pkg/snowflake"
@@ -183,9 +184,10 @@ func (r *userRepo) Update(ctx context.Context, user *biz.User) error {
 func (r *userRepo) Delete(ctx context.Context, id int64) error {
 	zap.L().Debug("userRepo.Delete", zap.Int64("id", id))
 
-	// 逻辑删除
+	// 逻辑删除：记录删除时间，使用 RFC3339 格式时间戳
 	_, err := r.data.db.ExecContext(ctx,
-		`UPDATE user SET deleted_at = '1' WHERE id = ?`, id,
+		`UPDATE user SET deleted_at = ? WHERE id = ?`,
+		time.Now().UTC().Format(time.RFC3339), id,
 	)
 	if err != nil {
 		zap.L().Error("userRepo.Delete failed", zap.Int64("id", id), zap.Error(err))

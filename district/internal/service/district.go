@@ -2,11 +2,15 @@ package service
 
 import (
 	"context"
+	"sort"
+
 	districtv1 "district/api/district/v1"
 	"district/internal/biz"
 
 	"github.com/google/wire"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 var ProviderSet = wire.NewSet(NewDistrictService)
@@ -26,8 +30,13 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 
 	districts, err := d.uc.Get(ctx, req.AdCode)
 	if err != nil {
-		return nil, err
+		zap.L().Error("GetProvinceTree failed", zap.String("adCode", req.AdCode), zap.Error(err))
+		return nil, status.Errorf(codes.Internal, "query district failed: %v", err)
 	}
+	if len(districts) == 0 {
+		return nil, status.Errorf(codes.NotFound, "district not found: %s", req.AdCode)
+	}
+
 	tree := BuildDistrictTree(districts)
 	return &districtv1.GetProvinceTreeResp{
 		Code:    200,
@@ -36,10 +45,12 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 	}, nil
 }
 
+// BuildDistrictTree 将平铺的行政区列表构建为树结构
+// 根节点判断：父 adCode 为 "100000" 或父节点不在结果集中
 func BuildDistrictTree(districts []*biz.District) []*districtv1.DistrictTree {
-	nodeMap := make(map[string]*districtv1.DistrictTree)
+	nodeMap := make(map[string]*districtv1.DistrictTree, len(districts))
 
-	// 1. 先创建所有节点
+	// 1. 创建所有节点
 	for _, d := range districts {
 		nodeMap[d.AdCode] = &districtv1.DistrictTree{
 			Id:           d.ID,
@@ -56,22 +67,28 @@ func BuildDistrictTree(districts []*biz.District) []*districtv1.DistrictTree {
 
 	// 2. 构建树
 	for _, node := range nodeMap {
-		// 没有父节点
-		if node.ParentAdCode == "100000" {
-			roots = append(roots, node)
-			continue
-		}
-
-		// 找父节点
 		parent, ok := nodeMap[node.ParentAdCode]
-		if !ok {
-			// 父节点不存在，作为根节点
+		if !ok || node.ParentAdCode == "100000" {
+			// 父节点不在结果集中，或是省级根节点
 			roots = append(roots, node)
 			continue
 		}
-
 		parent.Children = append(parent.Children, node)
 	}
 
+	// 3. 对各级 children 按 adCode 排序，保证输出稳定
+	sortTree(roots)
+
 	return roots
+}
+
+func sortTree(nodes []*districtv1.DistrictTree) {
+	sort.Slice(nodes, func(i, j int) bool {
+		return nodes[i].AdCode < nodes[j].AdCode
+	})
+	for _, node := range nodes {
+		if len(node.Children) > 0 {
+			sortTree(node.Children)
+		}
+	}
 }

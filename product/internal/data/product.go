@@ -27,7 +27,7 @@ func (r *productRepo) Get(ctx context.Context, id int64) (*biz.Product, error) {
 	p := &biz.Product{}
 	err := row.Scan(&p.ID, &p.Name, &p.Description, &p.Price, &p.Stock)
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if errors.Is(err, sql.ErrNoRows) {
 			zap.L().Warn("productRepo.Get not found", zap.Int64("id", id))
 		} else {
 			zap.L().Error("productRepo.Get failed", zap.Int64("id", id), zap.Error(err))

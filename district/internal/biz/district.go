@@ -23,7 +23,6 @@ type District struct {
 // DistrictRepo 数据仓库接口
 type DistrictRepo interface {
 	Get(ctx context.Context, adCode string) ([]*District, error)
-	List(ctx context.Context, adCode string) ([]*District, error)
 }
 
 // DistrictUseCase 行政区用例

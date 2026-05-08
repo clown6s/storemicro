@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	etcdreg "github.com/go-kratos/kratos/contrib/registry/etcd/v2"
 	"github.com/go-kratos/kratos/v2/transport/grpc/resolver/discovery"
@@ -15,6 +16,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/keepalive"
 )
 
 // ServiceRegistration 描述一个后端 gRPC 服务的注册信息
@@ -27,11 +29,12 @@ type ServiceRegistration struct {
 
 // GatewayProxy 封装 grpc-gateway mux 和 gRPC 连接
 type GatewayProxy struct {
-	mux        *runtime.ServeMux
-	conns      []*grpc.ClientConn
-	etcdClient *clientv3.Client
-	rdb        *redis.Client
-	jwtSecret  string
+	mux         *runtime.ServeMux
+	conns       []*grpc.ClientConn
+	etcdClient  *clientv3.Client
+	rdb         *redis.Client
+	jwtSecret   string
+	otelHandler http.Handler // 缓存 otelhttp handler，避免每次请求都构建
 }
 
 // NewGatewayProxy 创建 grpc-gateway 代理
@@ -40,13 +43,21 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		jwtSecret: cfg.Jwt.Secret,
 	}
 
-	// 创建 Redis 客户端（用于 token 校验，支持单设备登录踢人）
+	// 创建 Redis 客户端（连接池配置）
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.Db,
+		Addr:         cfg.Redis.Addr,
+		Password:     cfg.Redis.Password,
+		DB:           cfg.Redis.Db,
+		PoolSize:     20,
+		MinIdleConns: 5,
+		DialTimeout:  3 * time.Second,
+		ReadTimeout:  2 * time.Second,
+		WriteTimeout: 2 * time.Second,
+		MaxRetries:   3,
 	})
-	if err := rdb.Ping(context.Background()).Err(); err != nil {
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer pingCancel()
+	if err := rdb.Ping(pingCtx).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect redis: %w", err)
 	}
 	proxy.rdb = rdb
@@ -72,12 +83,17 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		discovery.PrintDebugLog(false),
 	)
 
-	// gRPC 连接选项
+	// gRPC 连接选项（keepalive 保活 + otel 追踪）
 	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithResolvers(discoveryBuilder),
 		grpc.WithDefaultServiceConfig(`{"loadBalancingPolicy":"round_robin"}`),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithKeepaliveParams(keepalive.ClientParameters{
+			Time:                20 * time.Second, // 20s 无活动则发 ping
+			Timeout:             5 * time.Second,  // ping 超时 5s
+			PermitWithoutStream: true,
+		}),
 	}
 
 	// 创建 grpc-gateway ServeMux
@@ -104,13 +120,18 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		zapLog.Info("service registered", zap.String("service", svc.Name))
 	}
 
+	// 预构建 otelhttp handler（避免每次请求重新 wrap）
+	proxy.otelHandler = otelhttp.NewHandler(
+		jwtAuth(proxy.jwtSecret, proxy.rdb, proxy.mux),
+		"gateway",
+	)
+
 	return proxy, nil
 }
 
 // ServeHTTP 实现 http.Handler 接口（OpenTelemetry → JWT 认证 → grpc-gateway mux）
 func (p *GatewayProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	handler := otelhttp.NewHandler(jwtAuth(p.jwtSecret, p.rdb, p.mux), "gateway")
-	handler.ServeHTTP(w, r)
+	p.otelHandler.ServeHTTP(w, r)
 }
 
 // Close 关闭所有连接

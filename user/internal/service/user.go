@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 
 	userv1 "user/api/user/v1"
 	"user/internal/biz"
@@ -156,17 +157,19 @@ func (s *UserService) mapError(err error) error {
 	if err == nil {
 		return nil
 	}
-	msg := err.Error()
-	switch msg {
-	case "user not found":
-		return status.Error(codes.NotFound, msg)
-	case "email already exists", "phone already exists":
-		return status.Error(codes.AlreadyExists, msg)
-	case "invalid user id", "phone is required", "password is required",
-		"email is required", "nothing to update",
-		"phone or password incorrect":
-		return status.Error(codes.InvalidArgument, msg)
+	switch {
+	case errors.Is(err, biz.ErrUserNotFound):
+		return status.Error(codes.NotFound, err.Error())
+	case errors.Is(err, biz.ErrPhoneExists), errors.Is(err, biz.ErrEmailExists):
+		return status.Error(codes.AlreadyExists, err.Error())
+	case errors.Is(err, biz.ErrInvalidUserID),
+		errors.Is(err, biz.ErrPhoneRequired),
+		errors.Is(err, biz.ErrPasswordRequired),
+		errors.Is(err, biz.ErrNothingToUpdate),
+		errors.Is(err, biz.ErrWrongCredentials),
+		errors.Is(err, biz.ErrTokenRequired):
+		return status.Error(codes.InvalidArgument, err.Error())
 	default:
-		return status.Error(codes.Internal, msg)
+		return status.Error(codes.Internal, err.Error())
 	}
 }

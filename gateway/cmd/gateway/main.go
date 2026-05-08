@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	pkgtracing "github.com/storemicro/pkg/tracing"
 	"go.uber.org/zap"
 )
@@ -51,10 +53,13 @@ func main() {
 	}
 	defer proxy.Close()
 
-	// 创建 HTTP 服务器
+	// 创建 HTTP 服务器（生产级超时配置）
 	srv := &http.Server{
-		Addr:    appCfg.Server.Addr,
-		Handler: proxy,
+		Addr:         appCfg.Server.Addr,
+		Handler:      newRootMux(proxy),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	zapLog.Info("storemicro gateway starting",
@@ -78,7 +83,7 @@ func main() {
 
 	zapLog.Info("gateway shutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
@@ -86,4 +91,24 @@ func main() {
 	}
 
 	zapLog.Info("gateway stopped")
+}
+
+// newRootMux 构建根路由：/healthz 健康检查 + /metrics + 其余全部交给 proxy
+func newRootMux(proxy *GatewayProxy) http.Handler {
+	mux := http.NewServeMux()
+
+	// 健康检查端点（Kubernetes liveness/readiness probe）
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+
+	// Prometheus metrics 端点
+	mux.Handle("/metrics", promhttp.Handler())
+
+	// 其余所有请求走 gateway proxy
+	mux.Handle("/", proxy)
+
+	return mux
 }

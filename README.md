@@ -185,92 +185,149 @@ curl -X POST http://localhost:8080/api/v1/product/ping
 
 ## 添加新服务（完整流程）
 
-以添加 `order`（订单）服务为例。
+以添加 `order`（订单）服务为例，gRPC 端口 `:9004`，健康检查端口 `:9104`。
 
-### 1. 复制目录骨架
+### 1. 创建目录结构
 
-```bash
-cp -r product order
-cd order
-# 修改 go.mod: module order
-# 修改 internal/ 下的包名引用: product → order
-# 修改 cmd/ 下的包名引用
+```
+order/
+├── api/order/v1/
+│   └── order.proto
+├── cmd/order/
+│   ├── main.go
+│   ├── wire.go
+│   └── wire_gen.go    # wire 自动生成
+├── configs/
+│   └── config.yaml
+└── internal/
+    ├── biz/
+    │   └── order.go
+    ├── conf/
+    │   └── conf.pb.go   # protoc 自动生成
+    ├── data/
+    │   ├── data.go
+    │   └── order.go
+    ├── pkg/log/
+    │   └── zap.go
+    ├── server/
+    │   └── grpc.go
+    └── service/
+        └── order.go
 ```
 
 ### 2. 编写 Proto 文件
 
-编辑 `api/order/v1/order.proto`，定义 service + message，配置 `google.api.http` 注解。
+编辑 `api/order/v1/order.proto`：
 
-### 3. 生成代码
+```protobuf
+syntax = "proto3";
+package api.order.v1;
+option go_package = "github.com/36111/kratos-services/order/api/order/v1;orderv1";
+import "google/api/annotations.proto";
+
+service Order {
+  rpc Ping (PingReq) returns (PingResp) {
+    option (google.api.http) = {
+      post: "/api/v1/order/ping"
+      body: "*"
+    };
+  }
+}
+message PingReq {}
+message PingResp { string message = 1; }
+```
+
+### 3. 生成 pb 文件
+
+在 `storemicro` 根目录执行：
 
 ```bash
-# 业务 proto
-protoc \
-  --proto_path=. --proto_path=./third_party \
+# 业务 proto（生成 pb.go 和 _grpc.pb.go）
+protoc --proto_path=. --proto_path=./third_party \
   --go_out=. --go_opt=paths=source_relative \
   --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-  api/order/v1/order.proto
+  ./order/api/order/v1/order.proto
 
-# 配置 proto
-protoc \
-  --proto_path=. --proto_path=./third_party \
+# 配置 proto（生成 conf.pb.go）
+protoc --proto_path=. --proto_path=./third_party \
   --go_out=. --go_opt=paths=source_relative \
-  internal/conf/conf.proto
+  ./order/internal/conf/conf.proto
 ```
 
-### 4. 实现业务代码
+### 4. 编写各层代码
 
-按 Kratos 三层结构依次实现：
+以 `product` 服务为模板，替换以下内容：
 
-1. `internal/biz/order.go` — 领域模型 + Repo 接口 + Usecase
-2. `internal/data/order.go` — Repo 接口的 MySQL 实现
-3. `internal/service/order.go` — gRPC 服务实现
-4. `internal/server/grpc.go` — 注册 OrderServer
-5. 各层的 `ProviderSet` 加入新构造函数
+| 文件 | 关键修改 |
+|------|----------|
+| `internal/biz/order.go` | Model、Repo 接口、Usecase、wire ProviderSet |
+| `internal/data/data.go` | 连接池：MaxOpenConns=100, MaxIdleConns=25, ConnMaxIdleTime=30min |
+| `internal/data/order.go` | Repo 接口的 MySQL 实现 |
+| `internal/service/order.go` | 实现 proto Server 接口，mapError 映射错误 |
+| `internal/server/grpc.go` | 中间件：recovery + tracing + logging + validate + ratelimit |
+| `cmd/order/wire.go` | build tag `wireinject`，wire.Build(...) |
+| `cmd/order/main.go` | gRPC 端口 `:9004`，健康检查 `:9104` |
 
-### 5. Wire 依赖注入
+### 5. 写 config.yaml
 
-编辑 `cmd/order/wire.go`，声明依赖关系，然后生成：
+```yaml
+server:
+  grpc:
+    addr: :9004
+
+data:
+  database:
+    source: "user:password@tcp(localhost:3306)/dbname?charset=utf8mb4&parseTime=True"
+
+registry:
+  etcd:
+    endpoints:
+      - localhost:2379
+    timeout: 5
+
+logger:
+  level: info
+
+tracing:
+  endpoint: 10.211.55.5:4317
+```
+
+### 6. 执行 wire 生成 wire_gen.go
 
 ```bash
-cd cmd/order && wire
+cd order/cmd/order && wire
 ```
-
-### 6. 修改配置
-
-`configs/config.yaml` 中修改 gRPC 端口（避免冲突），添加 tracing endpoint。
 
 ### 7. 接入 gateway
 
-**7.1** 复制 proto 文件到 gateway：
+**7.1** 复制 proto 到 gateway：
 
 ```bash
-cp api/order/v1/order.proto ../gateway/api/order/v1/
+mkdir -p gateway/api/order/v1
+cp order/api/order/v1/order.proto gateway/api/order/v1/
 ```
 
-**7.2** 在 gateway 目录生成代码：
+**7.2** 在 gateway 目录生成代码（生成 `.pb.go`、`_grpc.pb.go`、`.pb.gw.go`）：
 
 ```bash
-cd ../gateway
-protoc \
-  --proto_path=. --proto_path=./third_party \
+cd gateway
+protoc --proto_path=. --proto_path=./third_party \
   --go_out=. --go_opt=paths=source_relative \
   --go-grpc_out=. --go-grpc_opt=paths=source_relative \
   --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
-  api/order/v1/order.proto
+  ./api/order/v1/order.proto
 ```
 
-**7.3** 修改 `gateway/cmd/gateway/registry.go`，新增一行：
+**7.3** 修改 `gateway/cmd/gateway/proxy.go`，在 `gRPCServices` map 中添加：
 
 ```go
-var services = []ServiceRegistration{
-    {Name: "user", RegisterHandler: userv1.RegisterUserHandler},
-    {Name: "product", RegisterHandler: productv1.RegisterProductHandler},
-    {Name: "order", RegisterHandler: orderv1.RegisterOrderHandler},  // 新增
+var gRPCServices = map[string]string{
+    "user":     ":9001",
+    "product":  ":9002",
+    "district": ":9003",
+    "order":    ":9004",  // 新增
 }
 ```
-
-> 不需要改 `proxy.go`，它会自动循环 `services` 注册。
 
 **7.4** 如果 order 的 ping 不需要认证，在 `auth.go` 的 `noAuthPaths` 中添加白名单。
 
@@ -281,6 +338,18 @@ cd order && go run ./cmd/order/ -conf configs/config.yaml
 cd gateway && go run ./cmd/gateway/ -conf configs/config.yaml
 curl -X POST http://localhost:8080/api/v1/order/ping
 ```
+
+### 命名替换规则
+
+以 `product → order` 为例：
+
+| 位置 | 替换 |
+|------|------|
+| 包名 | `product` → `order` |
+| API package | `api.product.v1` → `api.order.v1` |
+| go_package | `github.com/36111/kratos-services/product/...` → `github.com/36111/kratos-services/order/...` |
+| etcd 注册名（无前缀） | `product` → `order` |
+| Jaeger ServiceName（前缀） | `storemicro-product` → `storemicro-order` |
 
 ---
 

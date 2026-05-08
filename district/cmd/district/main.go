@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"time"
@@ -97,6 +99,9 @@ func main() {
 
 	helper.Infow("msg", "service started", "name", Name)
 
+	// 健康检查 HTTP sidecar（:9103）
+	go startHealthServer(":9103", helper)
+
 	if err := app.Run(); err != nil {
 		helper.Errorf("service stopped with error: %v", err)
 		os.Exit(1)
@@ -135,4 +140,24 @@ func newApp(logger log.Logger, gs *grpc.Server, reg registry.Registrar) *kratos.
 		kratos.Server(gs),
 		kratos.Registrar(reg),
 	)
+}
+
+// startHealthServer 启动轻量级健康检查 HTTP 服务器
+func startHealthServer(addr string, helper *log.Helper) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": Name})
+	})
+	srv := &http.Server{
+		Addr:         addr,
+		Handler:      mux,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+	}
+	helper.Infow("msg", "health server starting", "addr", addr)
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		helper.Errorf("health server error: %v", err)
+	}
 }
