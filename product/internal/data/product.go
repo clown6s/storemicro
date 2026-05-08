@@ -49,7 +49,7 @@ func (r *productRepo) List(ctx context.Context, page, pageSize int32) ([]*biz.Pr
 		return nil, 0, err
 	}
 
-	offset := (page - 1) * pageSize
+	offset := int64(page-1) * int64(pageSize)
 	rows, err := r.data.db.QueryContext(ctx,
 		"SELECT id, name, description, price, stock FROM products LIMIT ? OFFSET ?",
 		pageSize, offset,

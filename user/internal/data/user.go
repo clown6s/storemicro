@@ -23,30 +23,6 @@ func NewUserRepo(data *Data) biz.UserRepo {
 	return &userRepo{data: data}
 }
 
-func (r *userRepo) Create(ctx context.Context, user *biz.User) error {
-	zap.L().Debug("userRepo.Create",
-		zap.String("phone", user.Phone),
-		zap.String("email", user.Email),
-	)
-
-	// 使用雪花算法生成 ID
-	id := snowflake.GenID()
-
-	_, err := r.data.db.ExecContext(ctx,
-		`INSERT INTO user (id, password, real_name, avatar, gender, age, phone, email, remark)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, user.Password, user.RealName, user.Avatar, user.Gender, user.Age,
-		user.Phone, user.Email, user.Remark,
-	)
-	if err != nil {
-		zap.L().Error("userRepo.Create failed", zap.Error(err))
-		return err
-	}
-
-	zap.L().Info("userRepo.Create success", zap.Int64("id", id))
-	return nil
-}
-
 func (r *userRepo) Get(ctx context.Context, id int64) (*biz.User, error) {
 	zap.L().Debug("userRepo.Get", zap.Int64("id", id))
 
@@ -123,8 +99,8 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 		return nil, 0, err
 	}
 
-	// 分页查询
-	offset := (page - 1) * pageSize
+	// 分页查询（int64 防止溢出）
+	offset := int64(page-1) * int64(pageSize)
 	querySQL := fmt.Sprintf(
 		`SELECT id, COALESCE(real_name,''), COALESCE(avatar,''), gender, COALESCE(age,0),
 		        phone, COALESCE(email,''), create_time, update_time, COALESCE(remark,'')
@@ -143,11 +119,10 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 	users := make([]*biz.User, 0)
 	for rows.Next() {
 		user := &biz.User{}
-		err := rows.Scan(&user.ID, &user.RealName, &user.Avatar, &user.Gender, &user.Age,
-			&user.Phone, &user.Email, &user.CreateTime, &user.UpdateTime, &user.Remark)
-		if err != nil {
+		if err := rows.Scan(&user.ID, &user.RealName, &user.Avatar, &user.Gender, &user.Age,
+			&user.Phone, &user.Email, &user.CreateTime, &user.UpdateTime, &user.Remark); err != nil {
 			zap.L().Error("userRepo.List scan failed", zap.Error(err))
-			continue
+			return nil, 0, err
 		}
 		users = append(users, user)
 	}
@@ -201,30 +176,6 @@ func (r *userRepo) Delete(ctx context.Context, id int64) error {
 
 	zap.L().Info("userRepo.Delete success", zap.Int64("id", id))
 	return nil
-}
-
-func (r *userRepo) EmailExists(ctx context.Context, email string) (bool, error) {
-	var count int
-	err := r.data.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM user WHERE email = ? AND (deleted_at IS NULL OR deleted_at = '')`, email,
-	).Scan(&count)
-	if err != nil {
-		zap.L().Error("userRepo.EmailExists failed", zap.String("email", email), zap.Error(err))
-		return false, err
-	}
-	return count > 0, nil
-}
-
-func (r *userRepo) PhoneExists(ctx context.Context, phone string) (bool, error) {
-	var count int
-	err := r.data.db.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM user WHERE phone = ? AND (deleted_at IS NULL OR deleted_at = '')`, phone,
-	).Scan(&count)
-	if err != nil {
-		zap.L().Error("userRepo.PhoneExists failed", zap.String("phone", phone), zap.Error(err))
-		return false, err
-	}
-	return count > 0, nil
 }
 
 // RegisterTx 事务注册：唯一性检查 + 创建用户原子操作，回填 user.ID

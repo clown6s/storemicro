@@ -101,8 +101,8 @@ func newRootMux(proxy *GatewayProxy) http.Handler {
 	// 健康检查端点（Kubernetes liveness/readiness probe）
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+		b, _ := json.Marshal(map[string]string{"status": "ok"})
+		_, _ = w.Write(b)
 	})
 
 	// Prometheus metrics 端点

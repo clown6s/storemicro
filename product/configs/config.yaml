@@ -2,7 +2,6 @@ server:
   grpc:
     addr: 0.0.0.0:9002
     timeout: 10s
-    qps: 100
 
 data:
   database:

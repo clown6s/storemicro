@@ -63,14 +63,11 @@ type User struct {
 
 // UserRepo 数据仓库接口（由 data 层实现）
 type UserRepo interface {
-	Create(ctx context.Context, user *User) error
 	Get(ctx context.Context, id int64) (*User, error)
 	GetByPhone(ctx context.Context, phone string) (*User, error)
 	List(ctx context.Context, page, pageSize int32, phone, name string) ([]*User, int64, error)
 	Update(ctx context.Context, user *User) error
 	Delete(ctx context.Context, id int64) error
-	EmailExists(ctx context.Context, email string) (bool, error)
-	PhoneExists(ctx context.Context, phone string) (bool, error)
 	RegisterTx(ctx context.Context, user *User) error // 事务注册（含唯一性检查）
 }
 

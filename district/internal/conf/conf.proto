@@ -23,7 +23,6 @@ message Server {
   message GRPC {
     string addr = 1;
     google.protobuf.Duration timeout = 2;
-    int64  qps  = 3;
   }
   GRPC grpc = 1;
 }

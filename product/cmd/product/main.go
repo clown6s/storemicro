@@ -109,12 +109,19 @@ func main() {
 	helper.Infow("msg", "service started", "name", Name)
 
 	// 健康检查 HTTP sidecar（:9102）
-	go startHealthServer(":9102", helper)
+	healthSrv := startHealthServer(":9102", helper)
 
 	// 启动服务（阻塞，内部监听信号并优雅退出）
 	if err := app.Run(); err != nil {
 		helper.Errorf("failed to run app: %v", err)
 		os.Exit(1)
+	}
+
+	// 优雅关闭健康检查服务器
+	if healthSrv != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = healthSrv.Shutdown(ctx)
 	}
 }
 
@@ -145,13 +152,13 @@ func newApp(logger log.Logger, gs *grpc.Server, reg registry.Registrar) *kratos.
 	)
 }
 
-// startHealthServer 启动轻量级健康检查 HTTP 服务器（含 Prometheus metrics）
-func startHealthServer(addr string, helper *log.Helper) {
+// startHealthServer 启动轻量级健康检查 HTTP 服务器（含 Prometheus metrics），返回 server 引用供优雅关闭
+func startHealthServer(addr string, helper *log.Helper) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok", "service": Name})
+		b, _ := json.Marshal(map[string]string{"status": "ok", "service": Name})
+		_, _ = w.Write(b)
 	})
 	mux.Handle("/metrics", promhttp.Handler())
 	srv := &http.Server{
@@ -161,7 +168,10 @@ func startHealthServer(addr string, helper *log.Helper) {
 		WriteTimeout: 5 * time.Second,
 	}
 	helper.Infow("msg", "health server starting", "addr", addr)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		helper.Errorf("health server error: %v", err)
-	}
+	go func() {
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			helper.Errorf("health server error: %v", err)
+		}
+	}()
+	return srv
 }
