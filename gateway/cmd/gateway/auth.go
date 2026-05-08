@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -64,58 +64,48 @@ var noAuthPrefixes = []string{
 	"/healthz",
 }
 
-// rateLimitPaths 需要限流的路径前缀（防止暴力破解）
-var rateLimitPaths = map[string]*rateLimiter{
-	"/api/v1/user/login":    newRateLimiter(5, 60), // 5 次/分钟
-	"/api/v1/user/register": newRateLimiter(3, 60), // 3 次/分钟
+// redisRateLimiter 基于 Redis ZSET 滑动窗口限流（支持多实例共享）
+type redisRateLimiter struct {
+	rdb         *redis.Client
+	maxRequests int64
+	windowSec   int64
 }
 
-// rateLimiter 基于 IP 的滑动窗口限流器
-type rateLimiter struct {
-	maxRequests int
-	windowSec   int
-	mu          sync.Mutex
-	windows     map[string]*slidingWindow
-}
-
-type slidingWindow struct {
-	timestamps []time.Time
-}
-
-func newRateLimiter(max, window int) *rateLimiter {
-	return &rateLimiter{
-		maxRequests: max,
-		windowSec:   window,
-		windows:     make(map[string]*slidingWindow),
+func newRedisRateLimiter(rdb *redis.Client, max, window int) *redisRateLimiter {
+	return &redisRateLimiter{
+		rdb:         rdb,
+		maxRequests: int64(max),
+		windowSec:   int64(window),
 	}
 }
 
-// allow 检查该 IP 是否允许请求
-func (rl *rateLimiter) allow(ip string) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
+// allow 使用 Redis ZSET 滑动窗口检查是否放行
+func (rl *redisRateLimiter) allow(ctx context.Context, key string) bool {
+	now := time.Now().UnixMilli()
+	windowStart := now - rl.windowSec*1000
 
-	now := time.Now()
-	window, ok := rl.windows[ip]
-	if !ok {
-		rl.windows[ip] = &slidingWindow{timestamps: []time.Time{now}}
+	pipe := rl.rdb.Pipeline()
+	pipe.ZRemRangeByScore(ctx, key, "0", strconv.FormatInt(windowStart, 10))
+	countCmd := pipe.ZCard(ctx, key)
+	pipe.ZAdd(ctx, key, redis.Z{Score: float64(now), Member: now})
+	pipe.Expire(ctx, key, time.Duration(rl.windowSec)*time.Second)
+	_, err := pipe.Exec(ctx)
+
+	if err != nil {
+		// Redis 异常时降级放行
 		return true
 	}
-
-	cutoff := now.Add(-time.Duration(rl.windowSec) * time.Second)
-	valid := window.timestamps[:0]
-	for _, t := range window.timestamps {
-		if t.After(cutoff) {
-			valid = append(valid, t)
-		}
-	}
-	window.timestamps = append(valid, now)
-
-	return len(window.timestamps) <= rl.maxRequests
+	return countCmd.Val() < rl.maxRequests
 }
 
 // jwtAuth JWT 认证中间件（JWT 签名校验 + Redis token 有效性校验，支持单设备登录踢人）
 func jwtAuth(secret string, rdb *redis.Client, next http.Handler) http.Handler {
+	// 基于 Redis 的限流器（多 gateway 实例共享计数）
+	rateLimitPaths := map[string]*redisRateLimiter{
+		"/api/v1/user/login":    newRedisRateLimiter(rdb, 5, 60), // 5 次/分钟
+		"/api/v1/user/register": newRedisRateLimiter(rdb, 3, 60), // 3 次/分钟
+	}
+
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
@@ -131,7 +121,7 @@ func jwtAuth(secret string, rdb *redis.Client, next http.Handler) http.Handler {
 			// 限流检查（登录、注册等敏感接口）
 			if limiter, ok := rateLimitPaths[path]; ok {
 				ip := extractIP(r)
-				if !limiter.allow(ip) {
+				if !limiter.allow(r.Context(), "storemicro:rl:"+path+":"+ip) {
 					zapLog.Warn("rate limited", zap.String("path", path), zap.String("ip", ip))
 					writeJSON(w, http.StatusTooManyRequests, `{"code":429,"message":"too many requests"}`)
 					return
