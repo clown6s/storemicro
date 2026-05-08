@@ -61,6 +61,7 @@ type UserRepo interface {
 	Delete(ctx context.Context, id int64) error
 	EmailExists(ctx context.Context, email string) (bool, error)
 	PhoneExists(ctx context.Context, phone string) (bool, error)
+	RegisterTx(ctx context.Context, user *User) error // 事务注册（含唯一性检查）
 }
 
 // UserUsecase 用户用例
@@ -75,7 +76,7 @@ func NewUserUsecase(repo UserRepo, j *jwt.JWT, r *redis.Redis) *UserUsecase {
 	return &UserUsecase{repo: repo, jwt: j, redis: r}
 }
 
-// Register 用户注册
+// Register 用户注册（使用事务保证原子性）
 func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	// 参数校验
 	if user.Phone == "" {
@@ -93,30 +94,6 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 		return errors.New("password too short (min 6)")
 	}
 
-	// 手机号唯一性
-	exists, err := uc.repo.PhoneExists(ctx, user.Phone)
-	if err != nil {
-		zap.L().Error("check phone failed", zap.String("phone", user.Phone), zap.Error(err))
-		return err
-	}
-	if exists {
-		zap.L().Warn("phone already exists", zap.String("phone", user.Phone))
-		return ErrPhoneExists
-	}
-
-	// 邮箱唯一性（如果提供了邮箱）
-	if user.Email != "" {
-		exists, err = uc.repo.EmailExists(ctx, user.Email)
-		if err != nil {
-			zap.L().Error("check email failed", zap.String("email", user.Email), zap.Error(err))
-			return err
-		}
-		if exists {
-			zap.L().Warn("email already exists", zap.String("email", user.Email))
-			return ErrEmailExists
-		}
-	}
-
 	// bcrypt 加密密码
 	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -125,14 +102,14 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	}
 	user.Password = string(hashedPwd)
 
-	// 写入数据库
-	err = uc.repo.Create(ctx, user)
+	// 事务注册（唯一性检查 + 写入原子操作）
+	err = uc.repo.RegisterTx(ctx, user)
 	if err != nil {
-		zap.L().Error("create user failed", zap.Error(err))
+		zap.L().Error("register failed", zap.Error(err))
 		return err
 	}
 
-	zap.L().Info("user registered", zap.String("phone", user.Phone))
+	zap.L().Info("user registered", zap.Int64("id", user.ID), zap.String("phone", user.Phone))
 	return nil
 }
 

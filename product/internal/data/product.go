@@ -29,10 +29,10 @@ func (r *productRepo) Get(ctx context.Context, id int64) (*biz.Product, error) {
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			zap.L().Warn("productRepo.Get not found", zap.Int64("id", id))
-		} else {
-			zap.L().Error("productRepo.Get failed", zap.Int64("id", id), zap.Error(err))
+			return nil, biz.ErrProductNotFound
 		}
-		return nil, errors.New("product not found")
+		zap.L().Error("productRepo.Get failed", zap.Int64("id", id), zap.Error(err))
+		return nil, err
 	}
 	return p, nil
 }

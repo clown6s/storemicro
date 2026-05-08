@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"strconv"
 
 	productv1 "product/api/product/v1"
@@ -79,12 +80,9 @@ func (s *ProductService) mapError(err error) error {
 	if err == nil {
 		return nil
 	}
-	switch err.Error() {
-	case "product not found":
-		return status.Error(codes.NotFound, err.Error())
-	case "invalid product id", "product name is required", "price must be non-negative", "stock must be non-negative":
-		return status.Error(codes.InvalidArgument, err.Error())
-	default:
-		return status.Error(codes.Internal, err.Error())
+	if errors.Is(err, biz.ErrProductNotFound) {
+		return status.Error(codes.NotFound, "product not found")
 	}
+	zap.L().Error("unexpected product error", zap.Error(err))
+	return status.Error(codes.Internal, "internal error")
 }

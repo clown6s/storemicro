@@ -135,7 +135,7 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 
 	// 预构建 otelhttp handler（避免每次请求重新 wrap）
 	proxy.otelHandler = otelhttp.NewHandler(
-		jwtAuth(proxy.jwtSecret, proxy.rdb, proxy.mux),
+		corsMiddleware(jwtAuth(proxy.jwtSecret, proxy.rdb, proxy.mux)),
 		"gateway",
 	)
 

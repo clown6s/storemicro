@@ -11,6 +11,11 @@ import (
 // ProviderSet is biz providers.
 var ProviderSet = wire.NewSet(NewProductUsecase)
 
+// 统一错误变量
+var (
+	ErrProductNotFound = errors.New("product not found")
+)
+
 // Product 领域模型
 type Product struct {
 	ID          int64

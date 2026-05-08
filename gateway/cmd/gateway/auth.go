@@ -10,6 +10,25 @@ import (
 	"go.uber.org/zap"
 )
 
+// corsMiddleware CORS 跨域中间件
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		if origin != "" {
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Max-Age", "86400")
+		}
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Claims JWT claims，与 user 服务保持一致
 type Claims struct {
 	UserID int64  `json:"user_id"`
@@ -25,13 +44,31 @@ const (
 	ContextKeyPhone  contextKey = "phone"
 )
 
-// noAuthPaths 不需要 JWT 校验的路径（登录、注册、健康检查等）
-var noAuthPaths = map[string]bool{
-	"/api/v1/user/register": true,
-	"/api/v1/user/login":    true,
-	"/api/v1/user/ping":     true,
-	"/api/v1/product/ping":  true,
-	"/healthz":              true,
+// noAuthPrefixes 不需要 JWT 校验的路径前缀（登录、注册、健康检查等）
+var noAuthPrefixes = []string{
+	"/api/v1/user/register",
+	"/api/v1/user/login",
+	"/api/v1/user/ping",
+	"/api/v1/product/ping",
+	"/api/v1/district/provinceTree",
+	"/api/v1/district/",
+	"/healthz",
+}
+
+// rateLimitPaths 需要限流的路径前缀（防止暴力破解）
+var rateLimitPaths = map[string]*rateLimiter{
+	"/api/v1/user/login":    newRateLimiter(5, 60), // 5 次/分钟
+	"/api/v1/user/register": newRateLimiter(3, 60), // 3 次/分钟
+}
+
+// rateLimiter 基于 IP 的简易滑动窗口限流器
+type rateLimiter struct {
+	maxRequests int
+	windowSec   int
+}
+
+func newRateLimiter(max, window int) *rateLimiter {
+	return &rateLimiter{maxRequests: max, windowSec: window}
 }
 
 // jwtAuth JWT 认证中间件（JWT 签名校验 + Redis token 有效性校验，支持单设备登录踢人）
@@ -39,8 +76,15 @@ func jwtAuth(secret string, rdb *redis.Client, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// 白名单路径直接放行
-		if noAuthPaths[path] {
+		// 白名单路径前缀匹配
+		allowed := false
+		for _, prefix := range noAuthPrefixes {
+			if strings.HasPrefix(path, prefix) {
+				allowed = true
+				break
+			}
+		}
+		if allowed {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -96,7 +140,8 @@ func jwtAuth(secret string, rdb *redis.Client, next http.Handler) http.Handler {
 			return
 		} else if err != nil {
 			zapLog.Error("redis check token failed", zap.Error(err))
-			// Redis 不可用时降级：仅 JWT 校验通过就放行
+			writeJSON(w, http.StatusServiceUnavailable, `{"code":503,"message":"service temporarily unavailable"}`)
+			return
 		} else {
 			_ = val // val 是 userID，可按需记录
 		}

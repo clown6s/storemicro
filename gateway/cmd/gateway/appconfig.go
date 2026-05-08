@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"time"
 
@@ -82,7 +83,10 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 		return nil, err
 	}
 
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	// 展开环境变量 ${VAR:default} 语法
+	expanded := os.ExpandEnv(string(data))
+
+	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
 		return nil, err
 	}
 
@@ -98,6 +102,11 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 	}
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
+	}
+
+	// 校验 JWT secret
+	if len(cfg.Jwt.Secret) < 32 {
+		return nil, fmt.Errorf("jwt.secret must be at least 32 characters (current: %d), set via JWT_SECRET env var", len(cfg.Jwt.Secret))
 	}
 
 	return cfg, nil

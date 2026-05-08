@@ -221,3 +221,62 @@ func (r *userRepo) PhoneExists(ctx context.Context, phone string) (bool, error) 
 	}
 	return count > 0, nil
 }
+
+// RegisterTx 事务注册：唯一性检查 + 创建用户原子操作，回填 user.ID
+func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
+	tx, err := r.data.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx failed: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// 手机号唯一性检查（SELECT FOR UPDATE 锁行，防止并发）
+	var phoneCount int
+	err = tx.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM user WHERE phone = ? AND (deleted_at IS NULL OR deleted_at = '') FOR UPDATE`, user.Phone,
+	).Scan(&phoneCount)
+	if err != nil {
+		return fmt.Errorf("check phone failed: %w", err)
+	}
+	if phoneCount > 0 {
+		return biz.ErrPhoneExists
+	}
+
+	// 邮箱唯一性检查（如果提供了邮箱）
+	if user.Email != "" {
+		var emailCount int
+		err = tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM user WHERE email = ? AND (deleted_at IS NULL OR deleted_at = '') FOR UPDATE`, user.Email,
+		).Scan(&emailCount)
+		if err != nil {
+			return fmt.Errorf("check email failed: %w", err)
+		}
+		if emailCount > 0 {
+			return biz.ErrEmailExists
+		}
+	}
+
+	// 生成 ID 并写入
+	id := snowflake.GenID()
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO user (id, password, real_name, avatar, gender, age, phone, email, remark)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		id, user.Password, user.RealName, user.Avatar, user.Gender, user.Age,
+		user.Phone, user.Email, user.Remark,
+	)
+	if err != nil {
+		return fmt.Errorf("insert user failed: %w", err)
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx failed: %w", err)
+	}
+
+	// 回填 ID
+	user.ID = id
+	return nil
+}
