@@ -36,14 +36,23 @@ var (
 	ErrEncryptPassword  = errors.New("password encryption failed")
 	ErrInvalidPhone     = errors.New("invalid phone format")
 	ErrInvalidEmail     = errors.New("invalid email format")
-	ErrPasswordTooShort = errors.New("password too short (min 6)")
+	ErrPasswordTooShort = errors.New("password too short (min 8)")
 	ErrPasswordTooLong  = errors.New("password too long (max 72 bytes)")
+	ErrPasswordNoUpper  = errors.New("password must contain at least one uppercase letter")
+	ErrPasswordNoLower  = errors.New("password must contain at least one lowercase letter")
+	ErrPasswordNoDigit  = errors.New("password must contain at least one digit")
+	ErrNameTooLong      = errors.New("real name too long (max 50)")
+	ErrRemarkTooLong    = errors.New("remark too long (max 200)")
+	ErrAvatarTooLong    = errors.New("avatar URL too long (max 500)")
 )
 
 // 手机号和邮箱格式正则
 var (
 	phoneRegex = regexp.MustCompile(`^1[3-9]\d{9}$`)
 	emailRegex = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
+	hasUpper   = regexp.MustCompile(`[A-Z]`)
+	hasLower   = regexp.MustCompile(`[a-z]`)
+	hasDigit   = regexp.MustCompile(`\d`)
 )
 
 // User 领域模型（对应数据库 user 表全部字段）
@@ -98,17 +107,35 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 		zap.L().Warn("validation failed", zap.String("method", "Register"), zap.String("reason", "password is required"))
 		return ErrPasswordRequired
 	}
-	if len(user.Password) < 6 {
+	if len(user.Password) < 8 {
 		return ErrPasswordTooShort
 	}
 	if len(user.Password) > 72 {
 		return ErrPasswordTooLong
+	}
+	if !hasUpper.MatchString(user.Password) {
+		return ErrPasswordNoUpper
+	}
+	if !hasLower.MatchString(user.Password) {
+		return ErrPasswordNoLower
+	}
+	if !hasDigit.MatchString(user.Password) {
+		return ErrPasswordNoDigit
 	}
 	if user.Email != "" && !emailRegex.MatchString(user.Email) {
 		return ErrInvalidEmail
 	}
 	if len(user.Phone) > 20 {
 		return ErrInvalidPhone
+	}
+	if len(user.RealName) > 50 {
+		return ErrNameTooLong
+	}
+	if len(user.Remark) > 200 {
+		return ErrRemarkTooLong
+	}
+	if len(user.Avatar) > 500 {
+		return ErrAvatarTooLong
 	}
 
 	// bcrypt 加密密码
@@ -152,8 +179,8 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 		return "", nil, ErrWrongCredentials
 	}
 
-	// 生成 JWT token
-	token, err := uc.jwt.GenerateToken(user.ID, user.Phone)
+	// 生成 JWT token（只包含 user_id，不含 phone 等 PII）
+	token, err := uc.jwt.GenerateToken(user.ID)
 	if err != nil {
 		zap.L().Error("generate token failed", zap.Int64("id", user.ID), zap.Error(err))
 		return "", nil, ErrGenerateToken
@@ -240,14 +267,10 @@ func (uc *UserUsecase) Get(ctx context.Context, id int64) (*User, error) {
 	return uc.repo.Get(ctx, id)
 }
 
-// Update 更新用户
+// Update 更新用户（string 空值不更新，int32 < 0 不更新，int32 0 是有效值）
 func (uc *UserUsecase) Update(ctx context.Context, user *User) error {
 	if user.ID <= 0 {
 		return ErrInvalidUserID
-	}
-	if user.RealName == "" && user.Email == "" && user.Avatar == "" &&
-		user.Gender == 0 && user.Age == 0 && user.Remark == "" {
-		return ErrNothingToUpdate
 	}
 	err := uc.repo.Update(ctx, user)
 	if err != nil {

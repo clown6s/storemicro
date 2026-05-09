@@ -28,7 +28,7 @@ func NewProductService(uc *biz.ProductUsecase) *ProductService {
 }
 
 func (s *ProductService) GetProduct(ctx context.Context, req *productv1.GetProductReq) (*productv1.GetProductResp, error) {
-	zap.L().Info("GetProduct called", zap.String("id", req.Id))
+	zap.L().Debug("GetProduct called", zap.String("id", req.Id))
 
 	id, err := strconv.ParseInt(req.Id, 10, 64)
 	if err != nil {
@@ -44,8 +44,77 @@ func (s *ProductService) GetProduct(ctx context.Context, req *productv1.GetProdu
 	return toProductResp(p), nil
 }
 
+func (s *ProductService) CreateProduct(ctx context.Context, req *productv1.CreateProductReq) (*productv1.CreateProductResp, error) {
+	zap.L().Debug("CreateProduct called", zap.String("name", req.Name))
+
+	p := &biz.Product{
+		Name:        req.Name,
+		Description: req.Description,
+		Price:       req.Price,
+		Stock:       req.Stock,
+	}
+
+	created, err := s.uc.Create(ctx, p)
+	if err != nil {
+		zap.L().Warn("CreateProduct failed", zap.Error(err))
+		return nil, s.mapError(err)
+	}
+
+	return &productv1.CreateProductResp{
+		Code:    200,
+		Message: "created",
+		Data:    toProductResp(created),
+	}, nil
+}
+
+func (s *ProductService) UpdateProduct(ctx context.Context, req *productv1.UpdateProductReq) (*productv1.UpdateProductResp, error) {
+	zap.L().Debug("UpdateProduct called", zap.String("id", req.Id))
+
+	id, err := strconv.ParseInt(req.Id, 10, 64)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid product id: %s", req.Id)
+	}
+
+	p := &biz.Product{
+		ID:          id,
+		Name:        req.Name,
+		Description: req.Description,
+		Price:       req.Price,
+		Stock:       req.Stock,
+	}
+
+	if err := s.uc.Update(ctx, p); err != nil {
+		zap.L().Warn("UpdateProduct failed", zap.Int64("id", id), zap.Error(err))
+		return nil, s.mapError(err)
+	}
+
+	return &productv1.UpdateProductResp{
+		Code:    200,
+		Message: "updated",
+	}, nil
+}
+
+func (s *ProductService) DeleteProduct(ctx context.Context, req *productv1.DeleteProductReq) (*productv1.DeleteProductResp, error) {
+	zap.L().Debug("DeleteProduct called", zap.String("id", req.Id))
+
+	id, err := strconv.ParseInt(req.Id, 10, 64)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid product id: %s", req.Id)
+	}
+
+	if err := s.uc.Delete(ctx, id); err != nil {
+		zap.L().Warn("DeleteProduct failed", zap.Int64("id", id), zap.Error(err))
+		return nil, s.mapError(err)
+	}
+
+	return &productv1.DeleteProductResp{
+		Code:    200,
+		Message: "deleted",
+	}, nil
+}
+
 func (s *ProductService) ListProducts(ctx context.Context, req *productv1.ListProductsReq) (*productv1.ListProductsResp, error) {
-	zap.L().Info("ListProducts called", zap.Int32("page", req.Page), zap.Int32("page_size", req.PageSize))
+	zap.L().Debug("ListProducts called", zap.Int32("page", req.Page), zap.Int32("page_size", req.PageSize))
 
 	items, total, err := s.uc.List(ctx, req.Page, req.PageSize)
 	if err != nil {
@@ -83,6 +152,10 @@ func (s *ProductService) mapError(err error) error {
 	if errors.Is(err, biz.ErrProductNotFound) {
 		return status.Error(codes.NotFound, "product not found")
 	}
+	if errors.Is(err, biz.ErrProductNameTooLong) || errors.Is(err, biz.ErrProductDescTooLong) {
+		return status.Error(codes.InvalidArgument, err.Error())
+	}
+	// 包含其他验证错误
 	zap.L().Error("unexpected product error", zap.Error(err))
 	return status.Error(codes.Internal, "internal error")
 }

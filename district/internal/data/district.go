@@ -3,6 +3,8 @@ package data
 import (
 	"context"
 	"database/sql"
+	"fmt"
+
 	"district/internal/biz"
 
 	"go.uber.org/zap"
@@ -42,7 +44,7 @@ SELECT id, parent_adcode, adcode, name, level, center FROM district_tree`
 	rows, err := d.data.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		zap.L().Error("districtRepo.Get query failed", zap.String("adCode", adCode), zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("query district failed: %w", err)
 	}
 	defer rows.Close()
 
@@ -63,13 +65,13 @@ func scanDistricts(rows *sql.Rows) ([]*biz.District, error) {
 			&item.Center,
 		); err != nil {
 			zap.L().Error("districtRepo scan failed", zap.Error(err))
-			return nil, err
+			return nil, fmt.Errorf("scan district failed: %w", err)
 		}
 		districts = append(districts, item)
 	}
 	if err := rows.Err(); err != nil {
 		zap.L().Error("districtRepo rows error", zap.Error(err))
-		return nil, err
+		return nil, fmt.Errorf("district rows error: %w", err)
 	}
 	return districts, nil
 }

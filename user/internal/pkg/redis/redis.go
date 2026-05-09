@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/redis/go-redis/v9"
+	pkgretry "github.com/storemicro/pkg/retry"
 )
 
 // Redis 客户端封装
@@ -26,34 +27,44 @@ func NewRedis(addr, password string, db int) (*Redis, error) {
 		WriteTimeout: 2 * time.Second,
 		MaxRetries:   3,
 	})
-	// 验证连接
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := client.Ping(ctx).Err(); err != nil {
-		return nil, fmt.Errorf("failed to connect redis: %w", err)
+	// 验证连接（带重试）
+	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "redis",
+		func() error {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			return client.Ping(ctx).Err()
+		},
+	); err != nil {
+		return nil, fmt.Errorf("failed to connect redis after retries: %w", err)
 	}
 	return &Redis{client: client}, nil
 }
 
+// setTokenScript Lua 脚本原子化 token 操作，解决并发登录竞态条件
+// KEYS[1] = token正向映射 key, KEYS[2] = user_token反向映射 key
+// ARGV[1] = 新token, ARGV[2] = userID, ARGV[3] = 过期秒数
+//
+// 流程：读取旧token → 删除旧正向映射 → 写新正向映射 → 写反向映射
+// 所有操作在 Lua 中原子执行，避免并发登录时 token 被偷
+var setTokenScript = redis.NewScript(`
+local oldToken = redis.call('GET', KEYS[2])
+if oldToken and oldToken ~= '' then
+	redis.call('DEL', 'storemicro:token:' .. oldToken)
+end
+redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
+redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[3])
+return 1
+`)
+
 // SetToken 存储 token（登录成功后将 token -> userID 写入 Redis，设置过期时间）
 // 同时维护 user_token:{userID} -> token 反向映射，实现单设备登录
+// 使用 Lua 脚本保证原子性，避免并发登录竞态条件
 func (r *Redis) SetToken(ctx context.Context, token string, userID int64, expire time.Duration) error {
-	pipe := r.client.Pipeline()
+	tokenKey := fmt.Sprintf("storemicro:token:%s", token)
+	userTokenKey := fmt.Sprintf("storemicro:user_token:%d", userID)
+	expireSec := int64(expire.Seconds())
 
-	// 1) 查旧 token（通过 user_token:{userID} 反向映射）
-	oldTokenKey := fmt.Sprintf("storemicro:user_token:%d", userID)
-	oldToken, err := r.client.Get(ctx, oldTokenKey).Result()
-	if err == nil && oldToken != "" {
-		// 2) 删旧 token 的正向映射
-		pipe.Del(ctx, "storemicro:token:"+oldToken)
-	}
-
-	// 3) 写新 token 正向映射
-	pipe.Set(ctx, "storemicro:token:"+token, userID, expire)
-	// 4) 写 user_token 反向映射（TTL 与 token 一致）
-	pipe.Set(ctx, oldTokenKey, token, expire)
-
-	_, err = pipe.Exec(ctx)
+	_, err := setTokenScript.Run(ctx, r.client, []string{tokenKey, userTokenKey}, token, userID, expireSec).Result()
 	return err
 }
 

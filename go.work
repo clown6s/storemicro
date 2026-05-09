@@ -1,0 +1,12 @@
+go 1.26.1
+
+use (
+	./district
+	./gateway
+	./pkg/dbutil
+	./pkg/retry
+	./pkg/tracing
+	./pkg/zaplogger
+	./product
+	./user
+)

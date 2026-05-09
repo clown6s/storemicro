@@ -13,7 +13,9 @@ var ProviderSet = wire.NewSet(NewProductUsecase)
 
 // 统一错误变量
 var (
-	ErrProductNotFound = errors.New("product not found")
+	ErrProductNotFound    = errors.New("product not found")
+	ErrProductNameTooLong = errors.New("product name too long (max 200)")
+	ErrProductDescTooLong = errors.New("product description too long (max 2000)")
 )
 
 // Product 领域模型
@@ -75,6 +77,12 @@ func (uc *ProductUsecase) Create(ctx context.Context, p *Product) (*Product, err
 	if p.Name == "" {
 		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "product name is required"))
 		return nil, errors.New("product name is required")
+	}
+	if len(p.Name) > 200 {
+		return nil, ErrProductNameTooLong
+	}
+	if len(p.Description) > 2000 {
+		return nil, ErrProductDescTooLong
 	}
 	if p.Price < 0 {
 		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "price must be non-negative"))

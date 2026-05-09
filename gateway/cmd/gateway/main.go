@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +20,9 @@ import (
 
 func main() {
 	flag.Parse()
+
+	// 自动加载当前目录及上级目录的 .env 文件
+	loadDotenv()
 
 	// 加载配置文件
 	appCfg, err := LoadAppConfig(configFile)
@@ -114,4 +118,28 @@ func newRootMux(proxy *GatewayProxy) http.Handler {
 	mux.Handle("/", proxy)
 
 	return mux
+}
+
+// loadDotenv 自动加载 .env 文件（当前目录 → 上级目录），不覆盖已有环境变量
+func loadDotenv() {
+	for _, p := range []string{".env", "../.env"} {
+		if data, err := os.ReadFile(p); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" || strings.HasPrefix(line, "#") {
+					continue
+				}
+				key, val, ok := strings.Cut(line, "=")
+				if !ok {
+					continue
+				}
+				key = strings.TrimSpace(key)
+				val = strings.TrimSpace(val)
+				if os.Getenv(key) == "" {
+					os.Setenv(key, val)
+				}
+			}
+			return
+		}
+	}
 }

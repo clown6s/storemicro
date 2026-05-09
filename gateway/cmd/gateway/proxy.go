@@ -10,6 +10,7 @@ import (
 	"github.com/go-kratos/kratos/v2/transport/grpc/resolver/discovery"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/redis/go-redis/v9"
+	pkgretry "github.com/storemicro/pkg/retry"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -57,21 +58,33 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		WriteTimeout: 2 * time.Second,
 		MaxRetries:   3,
 	})
-	pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer pingCancel()
-	if err := rdb.Ping(pingCtx).Err(); err != nil {
-		return nil, fmt.Errorf("failed to connect redis: %w", err)
+
+	// 带重试的 Redis 连接验证（5 次指数退避）
+	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "redis",
+		func() error {
+			pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer pingCancel()
+			return rdb.Ping(pingCtx).Err()
+		},
+	); err != nil {
+		return nil, fmt.Errorf("failed to connect redis after retries: %w", err)
 	}
 	proxy.rdb = rdb
 	zapLog.Info("redis connected", zap.String("addr", cfg.Redis.Addr))
 
-	// 创建 etcd client（用于服务发现）
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   cfg.Etcd.Endpoints,
-		DialTimeout: cfg.Etcd.DialTimeout,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect etcd: %w", err)
+	// 创建 etcd client（用于服务发现，带重试）
+	var etcdClient *clientv3.Client
+	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "etcd",
+		func() error {
+			var err error
+			etcdClient, err = clientv3.New(clientv3.Config{
+				Endpoints:   cfg.Etcd.Endpoints,
+				DialTimeout: cfg.Etcd.DialTimeout,
+			})
+			return err
+		},
+	); err != nil {
+		return nil, fmt.Errorf("failed to connect etcd after retries: %w", err)
 	}
 	proxy.etcdClient = etcdClient
 
@@ -104,6 +117,10 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		}`),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithUnaryInterceptor(circuitBreakerUnaryInterceptor()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(4*1024*1024), // 4MB 接收上限
+			grpc.MaxCallSendMsgSize(4*1024*1024), // 4MB 发送上限
+		),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                20 * time.Second,
 			Timeout:             5 * time.Second,
@@ -137,7 +154,7 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 
 	// 预构建 otelhttp handler（避免每次请求重新 wrap）
 	proxy.otelHandler = otelhttp.NewHandler(
-		corsMiddleware(proxy.allowOrigins)(jwtAuth(proxy.jwtSecret, proxy.rdb, proxy.mux)),
+		corsMiddleware(proxy.allowOrigins)(securityHeadersMiddleware(jwtAuth(proxy.jwtSecret, proxy.rdb, proxy.mux))),
 		"gateway",
 	)
 

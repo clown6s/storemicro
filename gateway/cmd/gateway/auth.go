@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,6 +12,21 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
+
+// securityHeadersMiddleware 添加安全响应头，防止常见的 Web 攻击
+func securityHeadersMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("X-XSS-Protection", "1; mode=block")
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+		w.Header().Set("Cache-Control", "no-store")
+		// HSTS：强制 HTTPS（仅当服务通过 HTTPS 提供时生效，不影响 HTTP）
+		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		next.ServeHTTP(w, r)
+	})
+}
 
 // corsMiddleware CORS 跨域中间件（白名单模式，防止任意 Origin 窃取凭证）
 func corsMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
@@ -40,10 +56,9 @@ func corsMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 	}
 }
 
-// Claims JWT claims，与 user 服务保持一致
+// Claims JWT claims（只含 user_id，不存 phone 等 PII）
 type Claims struct {
-	UserID int64  `json:"user_id"`
-	Phone  string `json:"phone"`
+	UserID int64 `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
@@ -52,7 +67,6 @@ type contextKey string
 
 const (
 	ContextKeyUserID contextKey = "user_id"
-	ContextKeyPhone  contextKey = "phone"
 )
 
 // noAuthPrefixes 不需要 JWT 校验的路径前缀（登录、注册、健康检查等）
@@ -92,8 +106,12 @@ func (rl *redisRateLimiter) allow(ctx context.Context, key string) bool {
 	_, err := pipe.Exec(ctx)
 
 	if err != nil {
-		// Redis 异常时降级放行
-		return true
+		// Redis 异常时 fail-closed：拒绝请求并记录告警，防止被踢掉的旧 token 继续使用
+		zapLog.Error("rate limiter redis error, fail-closed",
+			zap.String("key", key),
+			zap.Error(err),
+		)
+		return false
 	}
 	return countCmd.Val() < rl.maxRequests
 }
@@ -180,16 +198,21 @@ func jwtAuth(secret string, rdb *redis.Client, next http.Handler) http.Handler {
 			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
 			return
 		} else if err != nil {
-			zapLog.Error("redis check token failed", zap.Error(err))
+			// Redis 故障时 fail-closed：拒绝请求，避免被踢掉的 token 继续使用
+			// 这比 fail-open 更安全，但需要运维保证 Redis 高可用
+			zapLog.Error("redis check token failed, fail-closed",
+				zap.String("path", path),
+				zap.Int64("user_id", claims.UserID),
+				zap.Error(err),
+			)
 			writeJSON(w, http.StatusServiceUnavailable, `{"code":503,"message":"service temporarily unavailable"}`)
 			return
 		} else {
 			_ = val // val 是 userID，可按需记录
 		}
 
-		// 将 user_id / phone 用类型安全的 key 写入 context
+		// 将 user_id 写入 context（不再写入 phone，避免 PII 泄露）
 		ctx := context.WithValue(r.Context(), ContextKeyUserID, claims.UserID)
-		ctx = context.WithValue(ctx, ContextKeyPhone, claims.Phone)
 		r = r.WithContext(ctx)
 
 		next.ServeHTTP(w, r)
@@ -203,22 +226,56 @@ func writeJSON(w http.ResponseWriter, code int, body string) {
 	_, _ = w.Write([]byte(body))
 }
 
-// extractIP 提取客户端真实 IP（优先 X-Forwarded-For，兼容 X-Real-IP）
+// extractIP 提取客户端真实 IP
+// 使用可信代理 IP 白名单来验证 X-Forwarded-For，防止 IP 伪造
+// 如果 RemoteAddr 不在白名单中（即直连客户端），直接使用 RemoteAddr
+// 如果在白名单中（经过可信代理），取 X-Forwarded-For 最左侧 IP
+// 生产环境应通过配置注入 trustedProxySubnets
 func extractIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.SplitN(xff, ",", 2)
-		ip := strings.TrimSpace(parts[0])
-		if ip != "" {
-			return ip
-		}
-	}
-	if rip := r.Header.Get("X-Real-IP"); rip != "" {
-		return rip
-	}
-	// RemoteAddr 格式 "ip:port"
-	idx := strings.LastIndex(r.RemoteAddr, ":")
-	if idx == -1 {
+	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
 		return r.RemoteAddr
 	}
-	return r.RemoteAddr[:idx]
+
+	// 检查是否来自可信代理（localhost / 内网）
+	if isTrustedProxy(remoteHost) {
+		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+			parts := strings.SplitN(xff, ",", 2)
+			ip := strings.TrimSpace(parts[0])
+			if ip != "" {
+				return ip
+			}
+		}
+		if rip := r.Header.Get("X-Real-IP"); rip != "" {
+			return rip
+		}
+	}
+
+	return remoteHost
+}
+
+// isTrustedProxy 检查 IP 是否来自可信代理（本地回环 + RFC 1918 私有网段）
+func isTrustedProxy(ip string) bool {
+	switch {
+	case ip == "127.0.0.1", ip == "::1", ip == "localhost":
+		return true
+	case strings.HasPrefix(ip, "10.") || strings.HasPrefix(ip, "192.168."):
+		return true
+	case strings.HasPrefix(ip, "172."):
+		// 172.16.0.0/12
+		parts := strings.SplitN(ip, ".", 4)
+		if len(parts) >= 2 {
+			second := 0
+			for _, c := range parts[1] {
+				if c < '0' || c > '9' {
+					return false
+				}
+				second = second*10 + int(c-'0')
+			}
+			if second >= 16 && second <= 31 {
+				return true
+			}
+		}
+	}
+	return false
 }

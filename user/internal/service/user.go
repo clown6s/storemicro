@@ -27,7 +27,7 @@ func NewUserService(uc *biz.UserUsecase) *UserService {
 }
 
 func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*userv1.GetUserResp, error) {
-	zap.L().Info("GetUser called", zap.Int64("id", req.Id))
+	zap.L().Debug("GetUser called", zap.Int64("id", req.Id))
 
 	if req.Id <= 0 {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid user id: %d", req.Id)
@@ -47,7 +47,7 @@ func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*use
 
 // Register 用户注册
 func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error) {
-	zap.L().Info("Register called", zap.String("phone", req.Phone))
+	zap.L().Debug("Register called", zap.String("phone", req.Phone))
 
 	user := &biz.User{
 		Phone:    req.Phone,
@@ -74,7 +74,7 @@ func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*u
 
 // Login 用户登录
 func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error) {
-	zap.L().Info("Login called", zap.String("phone", req.Phone))
+	zap.L().Debug("Login called", zap.String("phone", req.Phone))
 
 	token, user, err := s.uc.Login(ctx, req.Phone, req.Password)
 	if err != nil {
@@ -92,7 +92,7 @@ func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.
 
 // Logout 用户登出
 func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv1.LogoutResp, error) {
-	zap.L().Info("Logout called")
+	zap.L().Debug("Logout called")
 
 	if err := s.uc.Logout(ctx, req.Token); err != nil {
 		zap.L().Warn("Logout failed", zap.Error(err))
@@ -107,7 +107,7 @@ func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv
 
 // ListUsers 用户列表（分页）
 func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (*userv1.ListUsersResp, error) {
-	zap.L().Info("ListUsers called",
+	zap.L().Debug("ListUsers called",
 		zap.Int32("page", req.Page),
 		zap.Int32("pageSize", req.PageSize),
 		zap.String("phone", req.Phone),
@@ -171,7 +171,13 @@ func (s *UserService) mapError(err error) error {
 		errors.Is(err, biz.ErrInvalidPhone),
 		errors.Is(err, biz.ErrInvalidEmail),
 		errors.Is(err, biz.ErrPasswordTooShort),
-		errors.Is(err, biz.ErrPasswordTooLong):
+		errors.Is(err, biz.ErrPasswordTooLong),
+		errors.Is(err, biz.ErrPasswordNoUpper),
+		errors.Is(err, biz.ErrPasswordNoLower),
+		errors.Is(err, biz.ErrPasswordNoDigit),
+		errors.Is(err, biz.ErrNameTooLong),
+		errors.Is(err, biz.ErrRemarkTooLong),
+		errors.Is(err, biz.ErrAvatarTooLong):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:
 		zap.L().Error("unexpected user error", zap.Error(err))

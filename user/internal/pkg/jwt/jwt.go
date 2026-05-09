@@ -7,10 +7,9 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 )
 
-// Claims 自定义 JWT claims
+// Claims 自定义 JWT claims（只存 user_id，不存 phone 等 PII）
 type Claims struct {
-	UserID int64  `json:"user_id"`
-	Phone  string `json:"phone"`
+	UserID int64 `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
@@ -28,12 +27,11 @@ func NewJWT(secret string, expireHrs int64) *JWT {
 	}
 }
 
-// GenerateToken 生成 JWT token
-func (j *JWT) GenerateToken(userID int64, phone string) (string, error) {
+// GenerateToken 生成 JWT token（只包含 user_id，不包含 phone 等 PII 信息）
+func (j *JWT) GenerateToken(userID int64) (string, error) {
 	now := time.Now()
 	claims := Claims{
 		UserID: userID,
-		Phone:  phone,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(j.expireHrs) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(now),

@@ -12,7 +12,9 @@ import (
 
 	"district/internal/conf"
 	zaplog "district/internal/pkg/log"
+
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	pkgretry "github.com/storemicro/pkg/retry"
 	pkgtracing "github.com/storemicro/pkg/tracing"
 
 	etcd2 "github.com/go-kratos/kratos/contrib/registry/etcd/v2"
@@ -88,13 +90,19 @@ func main() {
 		}
 	}()
 
-	// 创建 etcd client 和 registrar
-	etcdClient, err := clientv3.New(clientv3.Config{
-		Endpoints:   bc.Registry.Etcd.Endpoints,
-		DialTimeout: time.Duration(bc.Registry.Etcd.Timeout) * time.Second,
-	})
-	if err != nil {
-		helper.Errorf("failed to connect etcd: %v", err)
+	// 创建 etcd client 和 registrar（带重试）
+	var etcdClient *clientv3.Client
+	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "etcd",
+		func() error {
+			var err error
+			etcdClient, err = clientv3.New(clientv3.Config{
+				Endpoints:   bc.Registry.Etcd.Endpoints,
+				DialTimeout: time.Duration(bc.Registry.Etcd.Timeout) * time.Second,
+			})
+			return err
+		},
+	); err != nil {
+		helper.Errorf("failed to connect etcd after retries: %v", err)
 		os.Exit(1)
 	}
 	defer etcdClient.Close()

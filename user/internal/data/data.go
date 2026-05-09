@@ -11,6 +11,7 @@ import (
 	"github.com/go-kratos/kratos/v2/log"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/wire"
+	pkgretry "github.com/storemicro/pkg/retry"
 	"go.uber.org/zap"
 )
 
@@ -47,7 +48,12 @@ func NewData(c *conf.Data, r *redis.Redis, logger log.Logger) (*Data, func(), er
 	db.SetMaxIdleConns(int(maxIdleConns))
 	db.SetConnMaxLifetime(connMaxLifetime)
 
-	if err := db.PingContext(context.Background()); err != nil {
+	// 带重试的 MySQL 连接验证（5 次指数退避）
+	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "mysql",
+		func() error {
+			return db.PingContext(context.Background())
+		},
+	); err != nil {
 		return nil, nil, err
 	}
 

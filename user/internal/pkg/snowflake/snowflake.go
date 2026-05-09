@@ -3,6 +3,7 @@ package snowflake
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	sf "github.com/bwmarrin/snowflake"
@@ -19,10 +20,17 @@ const (
 	leaseTTL = 30
 )
 
-var node *sf.Node
+var (
+	node *sf.Node
 
-// NodeID 当前实例分配到的 node_id
-var NodeID int64
+	// NodeID 当前实例分配到的 node_id
+	NodeID int64
+
+	// nodeReady 标记 snowflake 节点是否可用
+	// 租约丢失且无法重新获取时，nodeReady 设为 false，GenID() 将直接报错而非生成冲突 ID
+	nodeReady bool
+	readyMu   sync.RWMutex
+)
 
 // InitWithEtcd 通过 etcd 自动分配唯一的 node_id
 // 启动时从 0 遍历到 1023，尝试抢锁，抢到第一个可用的即作为本实例的 node_id
@@ -59,6 +67,9 @@ func InitWithEtcd(etcdClient *clientv3.Client, serviceName string) error {
 			}
 			node = sfNode
 			NodeID = int64(i)
+			readyMu.Lock()
+			nodeReady = true
+			readyMu.Unlock()
 
 			// 后台续约
 			go keepAlive(etcdClient, lease.ID, key)
@@ -92,7 +103,10 @@ func keepAlive(etcdClient *clientv3.Client, leaseID clientv3.LeaseID, key string
 		select {
 		case resp, ok := <-ch:
 			if !ok {
-				zap.L().Warn("snowflake: keep-alive channel closed, node_id may be lost")
+				zap.L().Warn("snowflake: keep-alive channel closed, disabling GenID until lease is re-acquired")
+				readyMu.Lock()
+				nodeReady = false
+				readyMu.Unlock()
 				// 尝试重新续约
 				go retryKeepAlive(etcdClient, key)
 				return
@@ -135,23 +149,36 @@ func retryKeepAlive(etcdClient *clientv3.Client, key string) {
 					select {
 					case _, ok := <-ch:
 						if !ok {
+							readyMu.Lock()
+							nodeReady = false
+							readyMu.Unlock()
 							zap.L().Warn("snowflake: retry keep-alive closed, retrying...")
 							return
 						}
 					}
 				}
 			}()
+			readyMu.Lock()
+			nodeReady = true
+			readyMu.Unlock()
 			zap.L().Info("snowflake: re-acquired node_id successfully")
 			return
 		}
 
 		// key 被别人占了，放弃重试（说明本实例可能已经不再持有这个 node_id）
-		zap.L().Warn("snowflake: failed to re-acquire node_id, giving up")
+		// nodeReady 保持 false，GenID() 将直接报错
+		zap.L().Error("snowflake: failed to re-acquire node_id, GenID is permanently disabled - please restart instance")
 		return
 	}
 }
 
 // GenID 生成一个雪花 ID
-func GenID() int64 {
-	return node.Generate().Int64()
+// 如果节点 lease 已丢失且未重新获取，直接返回错误，防止与其他实例产生 ID 碰撞
+func GenID() (int64, error) {
+	readyMu.RLock()
+	defer readyMu.RUnlock()
+	if !nodeReady || node == nil {
+		return 0, fmt.Errorf("snowflake: node not ready, cannot generate ID (lease lost or not initialized)")
+	}
+	return node.Generate().Int64(), nil
 }

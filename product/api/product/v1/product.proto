@@ -12,6 +12,23 @@ service Product {
       get: "/api/v1/product/{id}"
     };
   }
+  rpc CreateProduct (CreateProductReq) returns (CreateProductResp) {
+    option (google.api.http) = {
+      post: "/api/v1/product"
+      body: "*"
+    };
+  }
+  rpc UpdateProduct (UpdateProductReq) returns (UpdateProductResp) {
+    option (google.api.http) = {
+      put: "/api/v1/product/{id}"
+      body: "*"
+    };
+  }
+  rpc DeleteProduct (DeleteProductReq) returns (DeleteProductResp) {
+    option (google.api.http) = {
+      delete: "/api/v1/product/{id}"
+    };
+  }
   rpc ListProducts (ListProductsReq) returns (ListProductsResp) {
     option (google.api.http) = {
       get: "/api/v1/product/list"
@@ -41,6 +58,41 @@ message GetProductResp {
   string description = 3;
   int64 price = 4; // 分为单位
   int32 stock = 5;
+}
+
+message CreateProductReq {
+  string name = 1;
+  string description = 2;
+  int64 price = 3;
+  int32 stock = 4;
+}
+
+message CreateProductResp {
+  uint32 code = 1;
+  string message = 2;
+  GetProductResp data = 3;
+}
+
+message UpdateProductReq {
+  string id = 1;
+  string name = 2;
+  string description = 3;
+  int64 price = 4;
+  int32 stock = 5;
+}
+
+message UpdateProductResp {
+  uint32 code = 1;
+  string message = 2;
+}
+
+message DeleteProductReq {
+  string id = 1;
+}
+
+message DeleteProductResp {
+  uint32 code = 1;
+  string message = 2;
 }
 
 message ListProductsReq {

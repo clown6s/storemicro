@@ -37,10 +37,10 @@ func (r *userRepo) Get(ctx context.Context, id int64) (*biz.User, error) {
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			zap.L().Warn("userRepo.Get not found", zap.Int64("id", id))
-		} else {
-			zap.L().Error("userRepo.Get failed", zap.Int64("id", id), zap.Error(err))
+			return nil, biz.ErrUserNotFound
 		}
-		return nil, biz.ErrUserNotFound
+		zap.L().Error("userRepo.Get failed", zap.Int64("id", id), zap.Error(err))
+		return nil, fmt.Errorf("query user failed: %w", err)
 	}
 	return user, nil
 }
@@ -59,10 +59,10 @@ func (r *userRepo) GetByPhone(ctx context.Context, phone string) (*biz.User, err
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			zap.L().Warn("userRepo.GetByPhone not found", zap.String("phone", phone))
-		} else {
-			zap.L().Error("userRepo.GetByPhone failed", zap.String("phone", phone), zap.Error(err))
+			return nil, biz.ErrUserNotFound
 		}
-		return nil, biz.ErrUserNotFound
+		zap.L().Error("userRepo.GetByPhone failed", zap.String("phone", phone), zap.Error(err))
+		return nil, fmt.Errorf("query user by phone failed: %w", err)
 	}
 	return user, nil
 }
@@ -133,17 +133,45 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 func (r *userRepo) Update(ctx context.Context, user *biz.User) error {
 	zap.L().Debug("userRepo.Update", zap.Int64("id", user.ID))
 
-	result, err := r.data.db.ExecContext(ctx,
-		`UPDATE user SET
-		   real_name = COALESCE(NULLIF(?, ''), real_name),
-		   avatar    = COALESCE(NULLIF(?, ''), avatar),
-		   gender    = COALESCE(NULLIF(?, 0), gender),
-		   age       = COALESCE(NULLIF(?, 0), age),
-		   email     = COALESCE(NULLIF(?, ''), email),
-		   remark    = COALESCE(NULLIF(?, ''), remark)
-		 WHERE id = ?`,
-		user.RealName, user.Avatar, user.Gender, user.Age, user.Email, user.Remark, user.ID,
-	)
+	// 动态构建 SET 子句：只更新实际传入了值的字段
+	// 约定：string 字段空值不更新，int32 字段 < 0 表示不更新（0 是有效值）
+	var setClauses []string
+	var args []any
+
+	if user.RealName != "" {
+		setClauses = append(setClauses, "real_name = ?")
+		args = append(args, user.RealName)
+	}
+	if user.Avatar != "" {
+		setClauses = append(setClauses, "avatar = ?")
+		args = append(args, user.Avatar)
+	}
+	if user.Gender >= 0 {
+		setClauses = append(setClauses, "gender = ?")
+		args = append(args, user.Gender)
+	}
+	if user.Age >= 0 {
+		setClauses = append(setClauses, "age = ?")
+		args = append(args, user.Age)
+	}
+	if user.Email != "" {
+		setClauses = append(setClauses, "email = ?")
+		args = append(args, user.Email)
+	}
+	if user.Remark != "" {
+		setClauses = append(setClauses, "remark = ?")
+		args = append(args, user.Remark)
+	}
+
+	if len(setClauses) == 0 {
+		zap.L().Debug("userRepo.Update: no fields to update", zap.Int64("id", user.ID))
+		return nil
+	}
+
+	args = append(args, user.ID)
+	query := fmt.Sprintf("UPDATE user SET %s WHERE id = ?", strings.Join(setClauses, ", "))
+
+	result, err := r.data.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		zap.L().Error("userRepo.Update failed", zap.Int64("id", user.ID), zap.Error(err))
 		return err
@@ -217,7 +245,10 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 	}
 
 	// 生成 ID 并写入
-	id := snowflake.GenID()
+	id, err := snowflake.GenID()
+	if err != nil {
+		return fmt.Errorf("generate snowflake id failed: %w", err)
+	}
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO user (id, password, real_name, avatar, gender, age, phone, email, remark)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,

@@ -122,9 +122,14 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 		cfg.Log.Level = "info"
 	}
 
-	// 校验 JWT secret
+	// 校验 JWT secret（必须通过环境变量注入，不允许空值）
 	if len(cfg.Jwt.Secret) < 32 {
-		return nil, fmt.Errorf("jwt.secret must be at least 32 characters (current: %d), set via JWT_SECRET env var", len(cfg.Jwt.Secret))
+		return nil, fmt.Errorf("jwt.secret must be at least 32 characters and set via JWT_SECRET env var (current: %d)", len(cfg.Jwt.Secret))
+	}
+
+	// Redis 密码为空时记录警告（本地开发可能不设密码，生产环境应通过 REDIS_PASSWORD 注入）
+	if cfg.Redis.Password == "" {
+		fmt.Fprintln(os.Stderr, "[WARN] redis.password is empty, set REDIS_PASSWORD env var for production")
 	}
 
 	return cfg, nil

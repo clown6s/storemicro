@@ -1,15 +1,14 @@
 package data
 
 import (
-	"context"
 	"database/sql"
-	"time"
 
 	"product/internal/conf"
 
 	"github.com/go-kratos/kratos/v2/log"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/wire"
+	pkgdb "github.com/storemicro/pkg/dbutil"
 	"go.uber.org/zap"
 )
 
@@ -21,31 +20,21 @@ type Data struct {
 	db *sql.DB
 }
 
-// NewData 创建 Data 实例（logger 仅用于 kratos 框架桥接）
+// NewData 创建 Data 实例（使用共享的 dbutil 连接池和重试逻辑）
 func NewData(c *conf.Data, logger log.Logger) (*Data, func(), error) {
-	db, err := sql.Open("mysql", c.Database.Source)
+	pool := pkgdb.DefaultPool()
+	if c.Database.MaxOpenConns > 0 {
+		pool.MaxOpenConns = int(c.Database.MaxOpenConns)
+	}
+	if c.Database.MaxIdleConns > 0 {
+		pool.MaxIdleConns = int(c.Database.MaxIdleConns)
+	}
+	if c.Database.ConnMaxLifetime > 0 {
+		pool.ConnMaxLifetime = int(c.Database.ConnMaxLifetime)
+	}
+
+	db, err := pkgdb.Connect("mysql", c.Database.Source, pool, logger)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	maxOpenConns := c.Database.MaxOpenConns
-	if maxOpenConns <= 0 {
-		maxOpenConns = 100
-	}
-	maxIdleConns := c.Database.MaxIdleConns
-	if maxIdleConns <= 0 {
-		maxIdleConns = 25
-	}
-	connMaxLifetime := time.Duration(c.Database.ConnMaxLifetime) * time.Second
-	if connMaxLifetime <= 0 {
-		connMaxLifetime = time.Hour
-	}
-
-	db.SetMaxOpenConns(int(maxOpenConns))
-	db.SetMaxIdleConns(int(maxIdleConns))
-	db.SetConnMaxLifetime(connMaxLifetime)
-
-	if err := db.PingContext(context.Background()); err != nil {
 		return nil, nil, err
 	}
 
