@@ -13,9 +13,13 @@ var ProviderSet = wire.NewSet(NewProductUsecase)
 
 // 统一错误变量
 var (
-	ErrProductNotFound    = errors.New("product not found")
-	ErrProductNameTooLong = errors.New("product name too long (max 200)")
-	ErrProductDescTooLong = errors.New("product description too long (max 2000)")
+	ErrProductNotFound     = errors.New("product not found")
+	ErrInvalidProductID    = errors.New("invalid product id")
+	ErrProductNameRequired = errors.New("product name is required")
+	ErrProductNameTooLong  = errors.New("product name too long (max 200)")
+	ErrProductDescTooLong  = errors.New("product description too long (max 2000)")
+	ErrProductPriceInvalid = errors.New("price must be non-negative")
+	ErrProductStockInvalid = errors.New("stock must be non-negative")
 )
 
 // Product 领域模型
@@ -49,7 +53,7 @@ func NewProductUsecase(repo ProductRepo) *ProductUsecase {
 func (uc *ProductUsecase) Get(ctx context.Context, id int64) (*Product, error) {
 	if id <= 0 {
 		zap.L().Warn("validation failed", zap.String("method", "Get"), zap.String("reason", "invalid product id"))
-		return nil, errors.New("invalid product id")
+		return nil, ErrInvalidProductID
 	}
 	return uc.repo.Get(ctx, id)
 }
@@ -76,7 +80,7 @@ func (uc *ProductUsecase) List(ctx context.Context, page, pageSize int32) ([]*Pr
 func (uc *ProductUsecase) Create(ctx context.Context, p *Product) (*Product, error) {
 	if p.Name == "" {
 		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "product name is required"))
-		return nil, errors.New("product name is required")
+		return nil, ErrProductNameRequired
 	}
 	if len(p.Name) > 200 {
 		return nil, ErrProductNameTooLong
@@ -86,11 +90,11 @@ func (uc *ProductUsecase) Create(ctx context.Context, p *Product) (*Product, err
 	}
 	if p.Price < 0 {
 		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "price must be non-negative"))
-		return nil, errors.New("price must be non-negative")
+		return nil, ErrProductPriceInvalid
 	}
 	if p.Stock < 0 {
 		zap.L().Warn("validation failed", zap.String("method", "Create"), zap.String("reason", "stock must be non-negative"))
-		return nil, errors.New("stock must be non-negative")
+		return nil, ErrProductStockInvalid
 	}
 
 	id, err := uc.repo.Create(ctx, p)
@@ -108,7 +112,7 @@ func (uc *ProductUsecase) Create(ctx context.Context, p *Product) (*Product, err
 func (uc *ProductUsecase) Update(ctx context.Context, p *Product) error {
 	if p.ID <= 0 {
 		zap.L().Warn("validation failed", zap.String("method", "Update"), zap.String("reason", "invalid product id"))
-		return errors.New("invalid product id")
+		return ErrInvalidProductID
 	}
 
 	err := uc.repo.Update(ctx, p)
@@ -125,7 +129,7 @@ func (uc *ProductUsecase) Update(ctx context.Context, p *Product) error {
 func (uc *ProductUsecase) Delete(ctx context.Context, id int64) error {
 	if id <= 0 {
 		zap.L().Warn("validation failed", zap.String("method", "Delete"), zap.String("reason", "invalid product id"))
-		return errors.New("invalid product id")
+		return ErrInvalidProductID
 	}
 
 	err := uc.repo.Delete(ctx, id)

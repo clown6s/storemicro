@@ -29,8 +29,9 @@ type TracingConfig struct {
 
 // ServerConfig 服务配置
 type ServerConfig struct {
-	Addr         string   `yaml:"addr"`
-	AllowOrigins []string `yaml:"allow_origins"`
+	Addr           string   `yaml:"addr"`
+	AllowOrigins   []string `yaml:"allow_origins"`
+	TrustedProxies []string `yaml:"trusted_proxies"`
 }
 
 // EtcdConfig etcd 配置

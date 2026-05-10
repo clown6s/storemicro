@@ -23,6 +23,10 @@ server:
   allow_origins:
     - "http://localhost:3000"
     - "http://127.0.0.1:3000"
+  trusted_proxies:
+    # Only set these to your real reverse proxy / load balancer IPs or CIDRs.
+    # Loopback is always trusted for local development.
+    - "127.0.0.1"
 
 # etcd 服务发现
 etcd:

@@ -30,20 +30,22 @@ type ServiceRegistration struct {
 
 // GatewayProxy 封装 grpc-gateway mux 和 gRPC 连接
 type GatewayProxy struct {
-	mux          *runtime.ServeMux
-	conns        []*grpc.ClientConn
-	etcdClient   *clientv3.Client
-	rdb          *redis.Client
-	jwtSecret    string
-	allowOrigins []string
-	otelHandler  http.Handler
+	mux            *runtime.ServeMux
+	conns          []*grpc.ClientConn
+	etcdClient     *clientv3.Client
+	rdb            *redis.Client
+	jwtSecret      string
+	allowOrigins   []string
+	trustedProxies []string
+	otelHandler    http.Handler
 }
 
 // NewGatewayProxy 创建 grpc-gateway 代理
 func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 	proxy := &GatewayProxy{
-		jwtSecret:    cfg.Jwt.Secret,
-		allowOrigins: cfg.Server.AllowOrigins,
+		jwtSecret:      cfg.Jwt.Secret,
+		allowOrigins:   cfg.Server.AllowOrigins,
+		trustedProxies: cfg.Server.TrustedProxies,
 	}
 
 	// 创建 Redis 客户端（连接池配置）
@@ -154,7 +156,7 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 
 	// 预构建 otelhttp handler（避免每次请求重新 wrap）
 	proxy.otelHandler = otelhttp.NewHandler(
-		corsMiddleware(proxy.allowOrigins)(securityHeadersMiddleware(jwtAuth(proxy.jwtSecret, proxy.rdb, proxy.mux))),
+		corsMiddleware(proxy.allowOrigins)(securityHeadersMiddleware(jwtAuth(proxy.jwtSecret, proxy.rdb, proxy.trustedProxies, proxy.mux))),
 		"gateway",
 	)
 

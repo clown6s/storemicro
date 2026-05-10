@@ -152,7 +152,12 @@ func (s *ProductService) mapError(err error) error {
 	if errors.Is(err, biz.ErrProductNotFound) {
 		return status.Error(codes.NotFound, "product not found")
 	}
-	if errors.Is(err, biz.ErrProductNameTooLong) || errors.Is(err, biz.ErrProductDescTooLong) {
+	if errors.Is(err, biz.ErrInvalidProductID) ||
+		errors.Is(err, biz.ErrProductNameRequired) ||
+		errors.Is(err, biz.ErrProductNameTooLong) ||
+		errors.Is(err, biz.ErrProductDescTooLong) ||
+		errors.Is(err, biz.ErrProductPriceInvalid) ||
+		errors.Is(err, biz.ErrProductStockInvalid) {
 		return status.Error(codes.InvalidArgument, err.Error())
 	}
 	// 包含其他验证错误
