@@ -17,6 +17,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	_ "google.golang.org/grpc/health"
 	"google.golang.org/grpc/keepalive"
 )
 
@@ -100,33 +101,20 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		discovery.PrintDebugLog(false),
 	)
 
-	// gRPC 连接选项（keepalive 保活 + otel 追踪 + retry 重试）
+	// gRPC 连接选项（keepalive 保活 + otel 追踪 + retry 重试 + 健康检查）
 	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithResolvers(discoveryBuilder),
-		grpc.WithDefaultServiceConfig(`{
-			"loadBalancingPolicy":"round_robin",
-			"methodConfig": [{
-				"name": [{}],
-				"retryPolicy": {
-					"maxAttempts": 3,
-					"initialBackoff": "0.1s",
-					"maxBackoff": "1s",
-					"backoffMultiplier": 2.0,
-					"retryableStatusCodes": ["UNAVAILABLE", "RESOURCE_EXHAUSTED"]
-				}
-			}]
-		}`),
+		grpc.WithDefaultServiceConfig(cfg.GrpcClient.BuildServiceConfig()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-		grpc.WithUnaryInterceptor(circuitBreakerUnaryInterceptor()),
+		grpc.WithUnaryInterceptor(circuitBreakerUnaryInterceptor(&cfg.GrpcClient.CircuitBreaker)),
 		grpc.WithDefaultCallOptions(
-			grpc.MaxCallRecvMsgSize(4*1024*1024), // 4MB 接收上限
-			grpc.MaxCallSendMsgSize(4*1024*1024), // 4MB 发送上限
+			grpc.MaxCallRecvMsgSize(cfg.GrpcClient.MaxRecvMsgSize*1024*1024),
+			grpc.MaxCallSendMsgSize(cfg.GrpcClient.MaxSendMsgSize*1024*1024),
 		),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                20 * time.Second,
-			Timeout:             5 * time.Second,
-			PermitWithoutStream: true,
+			Time:    30 * time.Second,
+			Timeout: 10 * time.Second,
 		}),
 	}
 

@@ -52,3 +52,32 @@ redis:
 tracing:
   endpoint: "10.211.55.5:4317"
   sample_rate: 0.1
+
+# gRPC 出站客户端配置
+grpc_client:
+  # 负载均衡策略：round_robin（轮询）| pick_first（首个可用）
+  load_balancing_policy: round_robin
+  # 客户端健康检查（通过 gRPC 内置 health checking 剔除不可用实例）
+  health_check:
+    enabled: true
+    interval: 10s
+    timeout: 3s
+  # 方法级重试策略
+  retry:
+    max_attempts: 3
+    initial_backoff: 0.1s
+    max_backoff: 1s
+    backoff_multiplier: 2.0
+    # 可重试的状态码（不建议包含 RESOURCE_EXHAUSTED，会加剧后端压力）
+    retryable_codes:
+      - UNAVAILABLE
+  # 熔断器（gobreaker，按服务隔离）
+  circuit_breaker:
+    max_requests: 5       # 半开状态最大并发
+    interval: 10          # 统计周期（秒）
+    timeout: 30           # 熔断时长（秒）
+    failure_ratio: 0.5    # 触发熔断的失败率
+    min_requests: 10      # 最少请求数才触发熔断
+  # 消息大小限制（MB）
+  max_recv_msg_size: 4
+  max_send_msg_size: 4

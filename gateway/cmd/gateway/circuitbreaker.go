@@ -2,32 +2,103 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"sync"
+	"time"
 
 	"github.com/sony/gobreaker"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 )
 
-// circuitBreakerSettings 熔断器配置（SRE 风格：失败率超过 50% 则熔断）
-var cbSettings = gobreaker.Settings{
-	Name:        "grpc-client",
-	MaxRequests: 5,        // 半开状态下允许的最大并发请求数
-	Interval:    10 * 1e9, // 统计周期（10秒）
-	Timeout:     30 * 1e9, // 熔断开启后的熔断时长（30秒）
-	ReadyToTrip: func(counts gobreaker.Counts) bool {
-		// 失败率 >= 50% 时触发熔断
-		if counts.Requests < 10 {
-			return false
-		}
-		failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
-		return failureRatio >= 0.5
-	},
+// cbStore 按服务名隔离的熔断器存储
+type cbStore struct {
+	mu  sync.RWMutex
+	cbs map[string]*gobreaker.CircuitBreaker
+	cfg *CircuitBreakerConfig
 }
 
-// circuitBreakerUnaryInterceptor 返回基于 gobreaker 的 gRPC 一元拦截器
-func circuitBreakerUnaryInterceptor() grpc.UnaryClientInterceptor {
-	cb := gobreaker.NewCircuitBreaker(cbSettings)
+var globalCB *cbStore
+
+// initCBStore 初始化熔断器存储（应用启动时调用一次）
+func initCBStore(cfg *CircuitBreakerConfig) {
+	globalCB = &cbStore{
+		cbs: make(map[string]*gobreaker.CircuitBreaker),
+		cfg: cfg,
+	}
+}
+
+// getCB 获取指定服务的熔断器（不存在则创建）
+func (s *cbStore) getCB(serviceName string) *gobreaker.CircuitBreaker {
+	s.mu.RLock()
+	cb, ok := s.cbs[serviceName]
+	s.mu.RUnlock()
+	if ok {
+		return cb
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// double check
+	if cb, ok = s.cbs[serviceName]; ok {
+		return cb
+	}
+	cb = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+		Name:        fmt.Sprintf("grpc-%s", serviceName),
+		MaxRequests: uint32(s.cfg.MaxRequests),
+		Interval:    time.Duration(s.cfg.Interval) * time.Second,
+		Timeout:     time.Duration(s.cfg.Timeout) * time.Second,
+		ReadyToTrip: func(counts gobreaker.Counts) bool {
+			if counts.Requests < uint32(s.cfg.MinRequests) {
+				return false
+			}
+			failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
+			return failureRatio >= s.cfg.FailureRatio
+		},
+		OnStateChange: func(name string, from, to gobreaker.State) {
+			zapLog.Warn("circuit breaker state changed",
+				zap.String("service", name),
+				zap.String("from", from.String()),
+				zap.String("to", to.String()),
+			)
+		},
+	})
+	s.cbs[serviceName] = cb
+	return cb
+}
+
+// extractServiceName 从 gRPC context 中提取服务名
+// 优先从 metadata 中的 x-service-name 获取（由网关注入），否则回退到方法解析
+func extractServiceName(ctx context.Context, method string) string {
+	// 尝试从 metadata 获取（适用于 proxy 侧注入的场景）
+	if md, ok := metadata.FromOutgoingContext(ctx); ok {
+		if svc, ok := md["x-service-name"]; ok && len(svc) > 0 {
+			return svc[0]
+		}
+	}
+	// 回退：从 gRPC 方法名解析（如 "/user.User/GetUser" → "user"）
+	for i, c := range method {
+		if c == '/' {
+			method = method[i+1:]
+			break
+		}
+	}
+	for i, c := range method {
+		if c == '.' {
+			return method[:i]
+		}
+	}
+	return method
+}
+
+// circuitBreakerUnaryInterceptor 返回按服务隔离的 gRPC 一元拦截器
+func circuitBreakerUnaryInterceptor(cfg *CircuitBreakerConfig) grpc.UnaryClientInterceptor {
+	initCBStore(cfg)
 
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+		serviceName := extractServiceName(ctx, method)
+		cb := globalCB.getCB(serviceName)
 		_, err := cb.Execute(func() (interface{}, error) {
 			return nil, invoker(ctx, method, req, reply, cc, opts...)
 		})
