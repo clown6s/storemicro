@@ -1,31 +1,101 @@
 package zaplogger
 
 import (
+	"fmt"
+	"io"
 	"os"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-var zapLog *zap.Logger
+var globalLog *zap.Logger
 
-// NewZapLogger 创建 zap logger
-// 返回 Kratos log.Logger 给 kratos 中间件（logging.Server）桥接使用
-// 同时将 *zap.Logger 存入全局，业务代码通过 zap.L() 获取
-func NewZapLogger(level string) log.Logger {
-	lv := parseLevel(level)
+// Config 日志配置
+type Config struct {
+	Level      string // debug, info, warn, error
+	Mode       string // dev (console) | prod (json)，默认 dev
+	Filepath   string // 日志文件路径，空 = 仅 stdout
+	MaxSize    int    // lumberjack: 单文件最大 MB，默认 100
+	MaxBackups int    // lumberjack: 保留旧文件数，默认 10
+	MaxAge     int    // lumberjack: 保留天数，默认 30
+	Compress   bool   // lumberjack: 是否 gzip 压缩旧文件
+}
 
-	enc := zapcore.NewConsoleEncoder(zap.NewDevelopmentEncoderConfig())
-	core := zapcore.NewCore(enc, zapcore.AddSync(os.Stdout), lv)
+// New 根据 Config 创建 zap logger
+// 返回 Kratos log.Logger 给 kratos 中间件桥接使用
+// 同时通过 zap.ReplaceGlobals 设置全局 *zap.Logger，业务代码通过 zap.L() 或 L() 获取
+func New(cfg Config) log.Logger {
+	lv := parseLevel(cfg.Level)
 
-	// 业务代码用：通过 zap.L() 获取，caller 正确指向业务代码
-	zapLog = zap.New(core, zap.AddCaller())
-	_ = zap.ReplaceGlobals(zapLog)
+	// 选择 encoder：prod 用 JSON，dev 用 Console
+	var enc zapcore.Encoder
+	if cfg.Mode == "prod" {
+		ec := zap.NewProductionEncoderConfig()
+		ec.TimeKey = "ts"
+		ec.EncodeTime = zapcore.ISO8601TimeEncoder
+		enc = zapcore.NewJSONEncoder(ec)
+	} else {
+		ec := zap.NewDevelopmentEncoderConfig()
+		enc = zapcore.NewConsoleEncoder(ec)
+	}
+
+	// 构造输出目标：文件 + stdout（tee），或仅 stdout
+	ws := buildWriters(cfg)
+
+	// 多 core 合并（同一个 encoder + level 写入多个 writer）
+	cores := make([]zapcore.Core, 0, len(ws))
+	for _, w := range ws {
+		cores = append(cores, zapcore.NewCore(enc, zapcore.AddSync(w), lv))
+	}
+	core := zapcore.NewTee(cores...)
+
+	// 业务代码用：通过 zap.L() / L() 获取
+	globalLog = zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
+	_ = zap.ReplaceGlobals(globalLog)
 
 	// Kratos 桥接用：Skip 2 层（log.Helper -> ZapLogger.Log -> kratos 调用方）
 	kratosLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(2))
 	return &ZapLogger{logger: kratosLogger}
+}
+
+// L 返回全局 *zap.Logger，供业务代码直接使用（等同于 zap.L()）
+func L() *zap.Logger {
+	return globalLog
+}
+
+// buildWriters 构造日志输出目标列表
+// 配置了 Filepath 时同时输出到文件和 stdout，否则仅 stdout
+func buildWriters(cfg Config) []io.Writer {
+	if cfg.Filepath == "" {
+		return []io.Writer{os.Stdout}
+	}
+
+	maxSize := cfg.MaxSize
+	if maxSize <= 0 {
+		maxSize = 100
+	}
+	maxBackups := cfg.MaxBackups
+	if maxBackups <= 0 {
+		maxBackups = 10
+	}
+	maxAge := cfg.MaxAge
+	if maxAge <= 0 {
+		maxAge = 30
+	}
+
+	fileWriter := &lumberjack.Logger{
+		Filename:   cfg.Filepath,
+		MaxSize:    maxSize,
+		MaxBackups: maxBackups,
+		MaxAge:     maxAge,
+		Compress:   cfg.Compress,
+	}
+
+	// 同时输出到文件和 stdout
+	return []io.Writer{fileWriter, os.Stdout}
 }
 
 // ZapLogger 实现 Kratos log.Logger 接口（给 resolver、logging middleware 等内部组件用）
@@ -108,4 +178,12 @@ func parseLevel(s string) zapcore.Level {
 	default:
 		return zapcore.InfoLevel
 	}
+}
+
+// Validate 校验配置合法性，不合法时返回 error
+func Validate(cfg Config) error {
+	if cfg.Mode != "" && cfg.Mode != "dev" && cfg.Mode != "prod" {
+		return fmt.Errorf("logger.mode must be 'dev' or 'prod', got: %s", cfg.Mode)
+	}
+	return nil
 }

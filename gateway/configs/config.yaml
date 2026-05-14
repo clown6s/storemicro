@@ -37,6 +37,12 @@ etcd:
 # 日志配置
 log:
   level: info
+  mode: dev          # dev (console 彩色) | prod (JSON 格式)
+  # filepath: /var/log/storemicro/gateway.log  # 日志文件路径，空 = 仅 stdout
+  # max_size: 100    # 单文件最大 MB（默认 100）
+  # max_backups: 10  # 保留旧文件数（默认 10）
+  # max_age: 30      # 保留天数（默认 30）
+  # compress: true   # gzip 压缩旧文件
 
 # JWT 配置（生产环境必须通过环境变量注入，不能使用默认值）
 jwt:

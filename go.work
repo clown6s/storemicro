@@ -7,6 +7,5 @@ use (
 	./pkg/retry
 	./pkg/tracing
 	./pkg/zaplogger
-	./product
 	./user
 )

@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/redis/go-redis/v9"
+	pkglog "github.com/storemicro/pkg/zaplogger"
 	"go.uber.org/zap"
 )
 
@@ -99,7 +100,7 @@ func (rl *redisRateLimiter) allow(ctx context.Context, key string) bool {
 	_, err := pipe.Exec(ctx)
 
 	if err != nil {
-		zapLog.Error("rate limiter redis error, fail-closed",
+		pkglog.L().Error("rate limiter redis error, fail-closed",
 			zap.String("key", key),
 			zap.Error(err),
 		)
@@ -122,7 +123,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			if limiter, ok := rateLimitRoutes[route]; ok {
 				ip := extractIP(r, trustedProxies)
 				if !limiter.allow(r.Context(), "storemicro:rl:"+path+":"+ip) {
-					zapLog.Warn("rate limited", zap.String("path", path), zap.String("ip", ip))
+					pkglog.L().Warn("rate limited", zap.String("path", path), zap.String("ip", ip))
 					writeJSON(w, http.StatusTooManyRequests, `{"code":429,"message":"too many requests"}`)
 					return
 				}
@@ -133,7 +134,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
-			zapLog.Warn("jwt auth failed: missing Authorization header",
+			pkglog.L().Warn("jwt auth failed: missing Authorization header",
 				zap.String("path", path),
 				zap.String("remote", r.RemoteAddr),
 			)
@@ -153,7 +154,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			return []byte(secret), nil
 		})
 		if err != nil || !token.Valid {
-			zapLog.Warn("jwt auth failed: invalid token",
+			pkglog.L().Warn("jwt auth failed: invalid token",
 				zap.String("path", path),
 				zap.Error(err),
 			)
@@ -169,14 +170,14 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 
 		val, err := rdb.Get(r.Context(), "storemicro:token:"+tokenStr).Result()
 		if err == redis.Nil {
-			zapLog.Warn("jwt auth failed: token revoked (logged in elsewhere)",
+			pkglog.L().Warn("jwt auth failed: token revoked (logged in elsewhere)",
 				zap.String("path", path),
 				zap.Int64("user_id", claims.UserID),
 			)
 			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
 			return
 		} else if err != nil {
-			zapLog.Error("redis check token failed, fail-closed",
+			pkglog.L().Error("redis check token failed, fail-closed",
 				zap.String("path", path),
 				zap.Int64("user_id", claims.UserID),
 				zap.Error(err),

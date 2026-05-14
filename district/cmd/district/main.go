@@ -62,8 +62,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 初始化 zap logger（仅控制台输出）
-	zapLogger := zaplog.NewZapLogger(bc.Logger.Level)
+	// 初始化 zap logger（支持 dev/prod 模式、文件轮转）
+	logCfg := zaplog.Config{
+		Level:      bc.Logger.Level,
+		Mode:       os.Getenv("LOG_MODE"), // dev | prod，空 = dev
+		Filepath:   os.Getenv("LOG_FILE"), // 日志文件路径，空 = 仅 stdout
+		MaxSize:    100,                   // 默认 100MB
+		MaxBackups: 10,                    // 默认保留 10 份
+		MaxAge:     30,                    // 默认保留 30 天
+		Compress:   os.Getenv("LOG_COMPRESS") == "true",
+	}
+	zapLogger := zaplog.NewZapLogger(logCfg)
 	log.SetLogger(zapLogger)
 
 	helper := log.NewHelper(zapLogger)

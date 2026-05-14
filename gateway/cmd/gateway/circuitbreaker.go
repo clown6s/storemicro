@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/sony/gobreaker"
+	pkglog "github.com/storemicro/pkg/zaplogger"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -57,7 +58,7 @@ func (s *cbStore) getCB(serviceName string) *gobreaker.CircuitBreaker {
 			return failureRatio >= s.cfg.FailureRatio
 		},
 		OnStateChange: func(name string, from, to gobreaker.State) {
-			zapLog.Warn("circuit breaker state changed",
+			pkglog.L().Warn("circuit breaker state changed",
 				zap.String("service", name),
 				zap.String("from", from.String()),
 				zap.String("to", to.String()),

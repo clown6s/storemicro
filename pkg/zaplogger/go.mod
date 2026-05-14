@@ -5,6 +5,7 @@ go 1.26.1
 require (
 	github.com/go-kratos/kratos/v2 v2.9.2
 	go.uber.org/zap v1.28.0
+	gopkg.in/natefinch/lumberjack.v2 v2.2.1
 )
 
 require (

@@ -13,6 +13,10 @@ data:
 
 logger:
   level: info
+  # mode 和文件轮转通过环境变量配置：
+  #   LOG_MODE=prod       启用 JSON 格式（默认 dev = console 彩色）
+  #   LOG_FILE=/var/log/storemicro/district.log  启用文件输出+轮转
+  #   LOG_COMPRESS=true   启用 gzip 压缩旧日志
 
 registry:
   etcd:

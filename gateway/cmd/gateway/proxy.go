@@ -11,6 +11,7 @@ import (
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/redis/go-redis/v9"
 	pkgretry "github.com/storemicro/pkg/retry"
+	pkglog "github.com/storemicro/pkg/zaplogger"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -73,7 +74,7 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		return nil, fmt.Errorf("failed to connect redis after retries: %w", err)
 	}
 	proxy.rdb = rdb
-	zapLog.Info("redis connected", zap.String("addr", cfg.Redis.Addr))
+	pkglog.L().Info("redis connected", zap.String("addr", cfg.Redis.Addr))
 
 	// 创建 etcd client（用于服务发现，带重试）
 	var etcdClient *clientv3.Client
@@ -139,7 +140,7 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 			return nil, fmt.Errorf("failed to register %s handler: %w", svc.Name, err)
 		}
 
-		zapLog.Info("service registered", zap.String("service", svc.Name))
+		pkglog.L().Info("service registered", zap.String("service", svc.Name))
 	}
 
 	// 预构建 otelhttp handler（避免每次请求重新 wrap）
@@ -158,7 +159,7 @@ func (p *GatewayProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Close 关闭所有连接
 func (p *GatewayProxy) Close() {
-	zapLog.Info("gateway proxy closing connections...")
+	pkglog.L().Info("gateway proxy closing connections...")
 	for _, conn := range p.conns {
 		if conn != nil {
 			conn.Close()

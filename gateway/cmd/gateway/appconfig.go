@@ -79,7 +79,13 @@ type EtcdConfig struct {
 
 // LogConfig 日志配置
 type LogConfig struct {
-	Level string `yaml:"level"`
+	Level      string `yaml:"level"`
+	Mode       string `yaml:"mode"`        // dev (console) | prod (json)，默认 dev
+	Filepath   string `yaml:"filepath"`    // 日志文件路径，空 = 仅 stdout
+	MaxSize    int    `yaml:"max_size"`    // 单文件最大 MB，默认 100
+	MaxBackups int    `yaml:"max_backups"` // 保留旧文件数，默认 10
+	MaxAge     int    `yaml:"max_age"`     // 保留天数，默认 30
+	Compress   bool   `yaml:"compress"`    // 是否 gzip 压缩旧文件
 }
 
 // JwtConfig JWT 配置
