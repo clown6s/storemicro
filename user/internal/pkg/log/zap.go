@@ -13,3 +13,8 @@ type Config = pkglog.Config
 func NewZapLogger(cfg Config) log.Logger {
 	return pkglog.New(cfg)
 }
+
+// NewNopLogger 返回静默 logger，用于 config.Load() 前抑制 Kratos 框架内部日志
+func NewNopLogger() log.Logger {
+	return pkglog.NewNopLogger()
+}

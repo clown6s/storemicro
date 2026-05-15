@@ -20,6 +20,9 @@ var ProviderSet = wire.NewSet(NewGRPCServer)
 
 // NewGRPCServer 创建 gRPC 服务器
 func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.DistrictService) *grpc.Server {
+	if c.Grpc == nil {
+		panic("grpc server config must not be nil, check config.yaml server.grpc section")
+	}
 	timeout := 3 * time.Second
 	if t := c.Grpc.Timeout; t != nil {
 		timeout = t.AsDuration()

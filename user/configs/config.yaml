@@ -6,7 +6,7 @@ server:
 data:
   database:
     driver: mysql
-    source: root:admin@zzp@tcp(10.211.55.5:3306)/store_micro?charset=utf8mb4&parseTime=true&loc=Local
+    source: root:${DB_PASSWORD:admin@zzp}@tcp(${DB_HOST:10.211.55.5}:${DB_PORT:3306})/store_micro?charset=utf8mb4&parseTime=true&loc=Local
     max_open_conns: 100
     max_idle_conns: 25
     conn_max_lifetime: 3600
@@ -26,13 +26,13 @@ registry:
 
 # JWT 配置（生产环境必须通过环境变量注入，不能使用默认值）
 jwt:
-  secret: dev-secret-key-must-be-at-least-32-chars!!
+  secret: ${JWT_SECRET:dev-secret-key-must-be-at-least-32-chars!!}
   expire_hours: 24
 
 # Redis 配置（生产环境必须通过环境变量注入密码）
 redis:
-  addr: 10.211.55.5:6379
-  password: "admin@zzp"
+  addr: ${REDIS_HOST:10.211.55.5}:${REDIS_PORT:6379}
+  password: "${REDIS_PASSWORD:admin@zzp}"
   db: 0
 
 # 链路追踪

@@ -102,6 +102,15 @@ func buildWriters(cfg Config) []io.Writer {
 	return []io.Writer{fileWriter, os.Stdout}
 }
 
+// nopLogger 静默日志，用于在 config.Load() 之前抑制 Kratos 框架内部日志
+type nopLogger struct{}
+
+func (nopLogger) Log(_ log.Level, _ ...any) error { return nil }
+
+// NewNopLogger 返回一个不输出任何内容的 Kratos log.Logger
+// 用于在 config.Load() 前调用 log.SetLogger() 抑制框架内部 DEBUG/INFO 日志
+func NewNopLogger() log.Logger { return nopLogger{} }
+
 // ZapLogger 实现 Kratos log.Logger 接口（给 resolver、logging middleware 等内部组件用）
 type ZapLogger struct {
 	logger *zap.Logger

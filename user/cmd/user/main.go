@@ -19,11 +19,11 @@ import (
 	"github.com/go-kratos/kratos/contrib/registry/etcd/v2"
 	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/config"
-	"github.com/go-kratos/kratos/v2/config/file"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	envexpand "github.com/storemicro/pkg/envexpand"
 	pkgretry "github.com/storemicro/pkg/retry"
 	pkgtracing "github.com/storemicro/pkg/tracing"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -50,9 +50,13 @@ func main() {
 	// 抑制 Kratos config.Load() 内部标准库 log 的 DEBUG 输出
 	stdlog.SetOutput(io.Discard)
 
+	// 抑制 Kratos config 包内部日志（config loaded、watcher's ctx cancel 等）
+	log.SetLogger(zaplog.NewNopLogger())
+
+	// 加载配置文件（自动展开 ${VAR:default} 环境变量）
 	c := config.New(
 		config.WithSource(
-			file.NewSource(confPath),
+			envexpand.NewSource(confPath),
 		),
 	)
 	if err := c.Load(); err != nil {

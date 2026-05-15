@@ -4,6 +4,7 @@ use (
 	./district
 	./gateway
 	./pkg/dbutil
+	./pkg/envexpand
 	./pkg/retry
 	./pkg/tracing
 	./pkg/zaplogger
