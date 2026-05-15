@@ -132,12 +132,10 @@ func DefaultAppConfig() *AppConfig {
 			MaxSendMsgSize: 4,
 		},
 		Etcd: EtcdConfig{
-			Endpoints:   []string{"10.211.55.5:2379"},
 			DialTimeout: 5 * time.Second,
 		},
 		Redis: RedisConfig{
-			Addr: "10.211.55.5:6379",
-			Db:   0,
+			Db: 0,
 		},
 		Log: LogConfig{
 			Level: "info",
@@ -183,10 +181,13 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 		cfg.Server.Addr = ":8080"
 	}
 	if len(cfg.Etcd.Endpoints) == 0 {
-		cfg.Etcd.Endpoints = []string{"10.211.55.5:2379"}
+		return nil, fmt.Errorf("etcd.endpoints is required in config")
 	}
 	if cfg.Etcd.DialTimeout == 0 {
 		cfg.Etcd.DialTimeout = 5 * time.Second
+	}
+	if cfg.Redis.Addr == "" {
+		return nil, fmt.Errorf("redis.addr is required in config")
 	}
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"

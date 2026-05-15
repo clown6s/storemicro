@@ -142,7 +142,8 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 		redisCtx, redisCancel := context.WithTimeout(r.Context(), 3*time.Second)
 		if err := proxy.rdb.Ping(redisCtx).Err(); err != nil {
 			redisCancel()
-			checks["redis"] = "unhealthy: " + err.Error()
+			pkglog.L().Warn("readyz: redis unhealthy", zap.Error(err))
+			checks["redis"] = "unhealthy"
 		} else {
 			redisCancel()
 			checks["redis"] = "ok"
@@ -155,7 +156,8 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 		if etcdErr != nil {
 			// 过滤掉正常的 "key not found" 错误（说明连接成功）
 			if !strings.Contains(etcdErr.Error(), "key not found") {
-				checks["etcd"] = "unhealthy: " + etcdErr.Error()
+				pkglog.L().Warn("readyz: etcd unhealthy", zap.Error(etcdErr))
+				checks["etcd"] = "unhealthy"
 			} else {
 				checks["etcd"] = "ok"
 			}
@@ -185,7 +187,7 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 
 	// Prometheus metrics 端点（需要 metrics 密钥认证，防止暴露内部指标）
 	if metricsPassword != "" {
-		mux.Handle("/metrics", basicAuth(promhttp.Handler(), metricsPassword))
+		mux.Handle("/metrics", metricsAuth(promhttp.Handler(), metricsPassword))
 	} else {
 		mux.Handle("/metrics", promhttp.Handler())
 	}
@@ -211,6 +213,8 @@ func loadDotenv() {
 				}
 				key = strings.TrimSpace(key)
 				val = strings.TrimSpace(val)
+				// 去除引号包裹的值（兼容 KEY="value" 和 KEY='value'）
+				val = strings.Trim(val, `"'`)
 				if os.Getenv(key) == "" {
 					os.Setenv(key, val)
 				}
@@ -220,8 +224,8 @@ func loadDotenv() {
 	}
 }
 
-// basicAuth 包装 handler，要求 Authorization header 中带 "Bearer {password}" 才放行（timing-safe 比较）
-func basicAuth(next http.Handler, password string) http.Handler {
+// metricsAuth 包装 handler，要求 Authorization header 中带 "Bearer {password}" 才放行（timing-safe 比较）
+func metricsAuth(next http.Handler, password string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
 		if !strings.HasPrefix(auth, "Bearer ") {

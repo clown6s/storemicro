@@ -49,13 +49,14 @@ root AS (
     LIMIT 1
 ),
 district_tree AS (
-    -- 从根节点向下遍历所有子节点
-    SELECT r.id, r.parent_adcode, r.adcode, r.name, r.level, r.center
+    -- 从根节点向下遍历所有子节点（限制深度防止循环引用）
+    SELECT r.id, r.parent_adcode, r.adcode, r.name, r.level, r.center, 1 AS depth
     FROM root r
     UNION ALL
-    SELECT d.id, d.parent_adcode, d.adcode, d.name, d.level, d.center
+    SELECT d.id, d.parent_adcode, d.adcode, d.name, d.level, d.center, dt.depth + 1
     FROM district d
     INNER JOIN district_tree dt ON d.parent_adcode = dt.adcode
+    WHERE dt.depth < 20
 )
 SELECT id, parent_adcode, adcode, name, level, center FROM district_tree`
 		args = append(args, adCode)

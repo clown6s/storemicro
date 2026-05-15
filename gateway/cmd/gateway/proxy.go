@@ -80,6 +80,10 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 	var etcdClient *clientv3.Client
 	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "etcd",
 		func(rCtx context.Context) error {
+			// 关闭前一次重试创建的连接，防止泄漏
+			if etcdClient != nil {
+				etcdClient.Close()
+			}
 			var err error
 			etcdClient, err = clientv3.New(clientv3.Config{
 				Endpoints:   cfg.Etcd.Endpoints,
@@ -143,9 +147,9 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		pkglog.L().Info("service registered", zap.String("service", svc.Name))
 	}
 
-	// 预构建 otelhttp handler（避免每次请求重新 wrap）
+	// 预构建 otel handler（panic recovery → OpenTelemetry → CORS → security headers → JWT 认证 → grpc-gateway mux）
 	proxy.otelHandler = otelhttp.NewHandler(
-		corsMiddleware(proxy.allowOrigins)(securityHeadersMiddleware(jwtAuth(proxy.jwtSecret, proxy.rdb, proxy.trustedProxies, proxy.mux))),
+		recoverMiddleware(corsMiddleware(proxy.allowOrigins)(securityHeadersMiddleware(jwtAuth(proxy.jwtSecret, proxy.rdb, proxy.trustedProxies, proxy.mux)))),
 		"gateway",
 	)
 

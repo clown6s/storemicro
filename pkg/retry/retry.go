@@ -79,7 +79,12 @@ func Do(ctx context.Context, cfg Config, name string, fn func(ctx context.Contex
 
 		// [L5] 指数退避 + 随机抖动（防止惊群效应）
 		jitter := time.Duration(rand.Float64() * 0.2 * float64(backoff))
-		backoff = time.Duration(float64(backoff)*cfg.BackoffMultiplier) + jitter
+		newBackoff := time.Duration(float64(backoff) * cfg.BackoffMultiplier)
+		// 防止浮点溢出导致 backoff 变为负值或超大值
+		if newBackoff <= 0 || newBackoff > cfg.MaxBackoff {
+			newBackoff = cfg.MaxBackoff
+		}
+		backoff = newBackoff + jitter
 		if backoff > cfg.MaxBackoff {
 			backoff = cfg.MaxBackoff
 		}

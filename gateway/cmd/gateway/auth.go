@@ -4,6 +4,8 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -13,6 +15,22 @@ import (
 	pkglog "github.com/storemicro/pkg/zaplogger"
 	"go.uber.org/zap"
 )
+
+// recoverMiddleware 全局 panic recovery，防止未捕获 panic 导致 goroutine 崩溃
+func recoverMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				pkglog.L().Error("panic recovered",
+					zap.Any("error", rec),
+					zap.Stack("stack"),
+				)
+				writeJSON(w, http.StatusInternalServerError, `{"code":500,"message":"internal server error"}`)
+			}
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
 
 func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -189,8 +207,12 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			return
 		}
 
-		val, err := rdb.Get(r.Context(), "storemicro:token:"+tokenStr).Result()
+		// Redis token 验证使用独立超时，防止 Redis 慢查询卡住认证流程
+		redisCtx, redisCancel := context.WithTimeout(r.Context(), 2*time.Second)
+
+		val, err := rdb.Get(redisCtx, "storemicro:token:"+tokenStr).Result()
 		if err == redis.Nil {
+			redisCancel()
 			pkglog.L().Warn("jwt auth failed: token revoked (logged in elsewhere)",
 				zap.String("path", path),
 				zap.Int64("user_id", claims.UserID),
@@ -198,6 +220,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
 			return
 		} else if err != nil {
+			redisCancel()
 			pkglog.L().Error("redis check token failed, fail-closed",
 				zap.String("path", path),
 				zap.Int64("user_id", claims.UserID),
@@ -206,6 +229,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			writeJSON(w, http.StatusServiceUnavailable, `{"code":503,"message":"service temporarily unavailable"}`)
 			return
 		}
+		redisCancel()
 		_ = val
 
 		// 校验 Redis 中 token 对应的 userID 与 JWT claims 一致
@@ -228,13 +252,14 @@ func routeKey(method, path string) string {
 	return method + " " + path
 }
 
-// isNoAuthRoute 检查请求是否在免认证白名单中（对 path 做 URL 标准化防止编码绕过）
-func isNoAuthRoute(method, path string) bool {
-	// URL 标准化：去除多余的 / 和 .
-	cleaned := path
-	for strings.Contains(cleaned, "//") {
-		cleaned = strings.ReplaceAll(cleaned, "//", "/")
+// isNoAuthRoute 检查请求是否在免认证白名单中
+// 先 URL 解码再做 path.Clean 标准化，防止编码绕过和路径穿越
+func isNoAuthRoute(method, rawPath string) bool {
+	unescaped, err := url.PathUnescape(rawPath)
+	if err != nil {
+		return false
 	}
+	cleaned := path.Clean(unescaped)
 	_, allowed := noAuthRoutes[method+" "+cleaned]
 	return allowed
 }
@@ -255,12 +280,15 @@ func extractIP(r *http.Request, trustedProxies []string) string {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			parts := strings.SplitN(xff, ",", 2)
 			ip := strings.TrimSpace(parts[0])
-			if ip != "" {
+			if ip != "" && net.ParseIP(ip) != nil {
 				return ip
 			}
 		}
 		if rip := r.Header.Get("X-Real-IP"); rip != "" {
-			return rip
+			rip = strings.TrimSpace(rip)
+			if net.ParseIP(rip) != nil {
+				return rip
+			}
 		}
 	}
 

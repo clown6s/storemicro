@@ -11,6 +11,7 @@ import (
 	"user/internal/biz"
 	"user/internal/pkg/snowflake"
 
+	"github.com/go-sql-driver/mysql"
 	pkgstr "github.com/storemicro/pkg/strutil"
 	"go.uber.org/zap"
 )
@@ -218,6 +219,20 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
+		// 捕获唯一索引冲突（errno 1062），映射为业务错误
+		var mysqlErr *mysql.MySQLError
+		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+			zap.L().Warn("update: duplicate entry",
+				zap.Int64("id", user.ID),
+				zap.String("message", mysqlErr.Message),
+			)
+			if strings.Contains(mysqlErr.Message, "email") {
+				return biz.ErrEmailExists
+			}
+			if strings.Contains(mysqlErr.Message, "phone") {
+				return biz.ErrPhoneExists
+			}
+		}
 		return fmt.Errorf("update user failed: %w", err)
 	}
 
@@ -315,6 +330,24 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 		user.Phone, user.Email, user.Remark,
 	)
 	if err != nil {
+		// 捕获唯一索引冲突（errno 1062），映射为业务错误
+		var mysqlErr *mysql.MySQLError
+		if errors.As(err, &mysqlErr) && mysqlErr.Number == 1062 {
+			zap.L().Warn("register: duplicate entry on insert",
+				zap.Int64("id", id),
+				zap.String("phone", pkgstr.MaskPhone(user.Phone)),
+				zap.Uint16("errno", mysqlErr.Number),
+				zap.String("message", mysqlErr.Message),
+			)
+			// 根据错误消息判断是手机号还是邮箱冲突
+			if strings.Contains(mysqlErr.Message, "phone") {
+				return biz.ErrPhoneExists
+			}
+			if strings.Contains(mysqlErr.Message, "email") {
+				return biz.ErrEmailExists
+			}
+			return biz.ErrPhoneExists // 默认返回手机号冲突
+		}
 		return fmt.Errorf("insert user failed: %w", err)
 	}
 
