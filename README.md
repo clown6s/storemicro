@@ -26,12 +26,12 @@ HTTP Client
 │  grpc-gateway + JWT 认证 + Redis     │
 │  OpenTelemetry HTTP/gRPC tracing     │
 └──────┬──────────┬──────────┬─────────┘
-       │ gRPC     │ gRPC     │ gRPC
-  ┌────▼───┐ ┌────▼────┐ ┌──▼────────┐
-  │  user  │ │ product │ │ district  │
-  │ :9001  │ │  :9002  │ │  :9003    │
-  └────┬───┘ └────┬────┘ └─────┬─────┘
-       │          │            │
+       │ gRPC     │ gRPC
+  ┌────▼───┐ ┌──▼────────┐
+  │  user  │ │ district  │
+  │ :9001  │ │  :9003    │
+  └────┬───┘ └─────┬─────┘
+       │            │
        └────┬─────┴─────┬──────┘
             │           │
      ┌──────▼──┐  ┌─────▼─────┐
@@ -49,7 +49,6 @@ HTTP Client
 |------|------|----------|------|
 | `gateway` | HTTP→gRPC 反向代理，JWT 认证，Redis token 校验，链路追踪 | `:8080` | HTTP |
 | `user` | 用户注册/登录/登出/查询，Redis 单设备登录 | `:9001` | gRPC |
-| `product` | 商品 CRUD 业务服务 | `:9002` | gRPC |
 | `district` | 区域/地址业务服务 | `:9003` | gRPC |
 
 ---
@@ -82,7 +81,6 @@ storemicro/
 │
 ├── gateway/                # HTTP 网关
 │   ├── api/                # protobuf 生成代码
-│   │   ├── product/v1/
 │   │   ├── user/v1/
 │   │   └── district/v1/
 │   ├── cmd/gateway/
@@ -108,7 +106,6 @@ storemicro/
 │   ├── configs/config.yaml
 │   └── third_party/
 │
-├── product/                # 商品服务（结构同 user）
 ├── district/               # 区域服务（结构同 user）
 └── README.md
 ```
@@ -126,7 +123,7 @@ data 层      ← 数据库操作，实现 biz 定义的 Repo 接口
 ### 请求链路
 
 ```
-Client → gateway(JWT认证) → gateway(grpc-gateway) → etcd(服务发现) → user/product(gRPC)
+Client → gateway(JWT认证) → gateway(grpc-gateway) → etcd(服务发现) → user/district(gRPC)
                 ↓                                          ↓
          Redis(token校验)                           MySQL(数据存储)
 ```
@@ -167,18 +164,14 @@ go install github.com/google/wire/cmd/wire@latest
 # 1. 启动 user 服务
 cd user && go run ./cmd/user/ -conf configs/config.yaml
 
-# 2. 启动 product 服务
-cd product && go run ./cmd/product/ -conf configs/config.yaml
-
-# 3. 启动 district 服务
+# 2. 启动 district 服务
 cd district && go run ./cmd/district/ -conf configs/config.yaml
 
-# 4. 启动 gateway（最后启动，依赖其他服务注册到 etcd）
+# 3. 启动 gateway（最后启动，依赖其他服务注册到 etcd）
 cd gateway && go run ./cmd/gateway/ -conf configs/config.yaml
 
-# 5. 验证
+# 4. 验证
 curl -X POST http://localhost:8080/api/v1/user/ping
-curl -X POST http://localhost:8080/api/v1/product/ping
 ```
 
 ---
@@ -256,7 +249,7 @@ protoc --proto_path=. --proto_path=./third_party \
 
 ### 4. 编写各层代码
 
-以 `product` 服务为模板，替换以下内容：
+以 `user` 服务为模板，替换以下内容：
 
 | 文件 | 关键修改 |
 |------|----------|
@@ -323,7 +316,6 @@ protoc --proto_path=. --proto_path=./third_party \
 ```go
 var gRPCServices = map[string]string{
     "user":     ":9001",
-    "product":  ":9002",
     "district": ":9003",
     "order":    ":9004",  // 新增
 }
@@ -341,15 +333,15 @@ curl -X POST http://localhost:8080/api/v1/order/ping
 
 ### 命名替换规则
 
-以 `product → order` 为例：
+以 `user → order` 为例：
 
 | 位置 | 替换 |
 |------|------|
-| 包名 | `product` → `order` |
-| API package | `api.product.v1` → `api.order.v1` |
-| go_package | `github.com/36111/kratos-services/product/...` → `github.com/36111/kratos-services/order/...` |
-| etcd 注册名（无前缀） | `product` → `order` |
-| Jaeger ServiceName（前缀） | `storemicro-product` → `storemicro-order` |
+| 包名 | `user` → `order` |
+| API package | `api.user.v1` → `api.order.v1` |
+| go_package | `github.com/36111/kratos-services/user/...` → `github.com/36111/kratos-services/order/...` |
+| etcd 注册名（无前缀） | `user` → `order` |
+| Jaeger ServiceName（前缀） | `storemicro-user` → `storemicro-order` |
 
 ---
 
@@ -365,7 +357,7 @@ go run ./cmd/user/ -conf configs/config.yaml  # 运行
 ### Proto 代码生成
 
 ```bash
-# 业务服务（user/product/district）
+# 业务服务（user/district）
 protoc --proto_path=. --proto_path=./third_party \
   --go_out=. --go_opt=paths=source_relative \
   --go-grpc_out=. --go-grpc_opt=paths=source_relative \
@@ -407,7 +399,7 @@ etcdctl --endpoints=10.211.55.5:2379 get / --prefix --keys-only
 
 - OTLP gRPC: `10.211.55.5:4317`
 - Jaeger UI: `http://10.211.55.5:16686`
-- 服务名: `storemicro-gateway`、`storemicro-user`、`storemicro-product`
+- 服务名: `storemicro-gateway`、`storemicro-user`、`storemicro-district`
 
 ---
 

@@ -24,7 +24,7 @@ import (
 
 // ServiceRegistration 描述一个后端 gRPC 服务的注册信息
 type ServiceRegistration struct {
-	// Name 服务名，用于 etcd 服务发现（如 "user"、"product"）
+	// Name 服务名，用于 etcd 服务发现（如 "user"、"district"）
 	Name string
 	// RegisterHandler 将 gRPC 连接注册到 grpc-gateway mux 的函数
 	RegisterHandler func(ctx context.Context, mux *runtime.ServeMux, conn *grpc.ClientConn) error
@@ -65,8 +65,8 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 
 	// 带重试的 Redis 连接验证（5 次指数退避）
 	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "redis",
-		func() error {
-			pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		func(rCtx context.Context) error {
+			pingCtx, pingCancel := context.WithTimeout(rCtx, 5*time.Second)
 			defer pingCancel()
 			return rdb.Ping(pingCtx).Err()
 		},
@@ -79,7 +79,7 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 	// 创建 etcd client（用于服务发现，带重试）
 	var etcdClient *clientv3.Client
 	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "etcd",
-		func() error {
+		func(rCtx context.Context) error {
 			var err error
 			etcdClient, err = clientv3.New(clientv3.Config{
 				Endpoints:   cfg.Etcd.Endpoints,

@@ -50,8 +50,8 @@ func NewData(c *conf.Data, r *redis.Redis, logger log.Logger) (*Data, func(), er
 
 	// 带重试的 MySQL 连接验证（5 次指数退避）
 	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "mysql",
-		func() error {
-			return db.PingContext(context.Background())
+		func(rCtx context.Context) error {
+			return db.PingContext(rCtx)
 		},
 	); err != nil {
 		return nil, nil, err

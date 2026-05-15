@@ -26,7 +26,7 @@ registry:
 
 # JWT 配置（生产环境必须通过环境变量注入，不能使用默认值）
 jwt:
-  secret: store-micro-jwt-secret-2026-production
+  secret: dev-secret-key-must-be-at-least-32-chars!!
   expire_hours: 24
 
 # Redis 配置（生产环境必须通过环境变量注入密码）

@@ -2,6 +2,7 @@ package jwt
 
 import (
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -17,6 +18,7 @@ type Claims struct {
 type JWT struct {
 	secret    []byte
 	expireHrs int64
+	issuer    string
 }
 
 // NewJWT 创建 JWT 工具
@@ -24,6 +26,7 @@ func NewJWT(secret string, expireHrs int64) *JWT {
 	return &JWT{
 		secret:    []byte(secret),
 		expireHrs: expireHrs,
+		issuer:    "storemicro",
 	}
 }
 
@@ -33,8 +36,13 @@ func (j *JWT) GenerateToken(userID int64) (string, error) {
 	claims := Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
+			// [L3] 补全标准 claims
+			Issuer:    j.issuer,
+			Subject:   fmt.Sprintf("%d", userID),
+			Audience:  jwt.ClaimStrings{"storemicro-api"},
 			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(j.expireHrs) * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
 		},
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)

@@ -29,8 +29,8 @@ func NewRedis(addr, password string, db int) (*Redis, error) {
 	})
 	// 验证连接（带重试）
 	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "redis",
-		func() error {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		func(rCtx context.Context) error {
+			ctx, cancel := context.WithTimeout(rCtx, 5*time.Second)
 			defer cancel()
 			return client.Ping(ctx).Err()
 		},
@@ -53,6 +53,15 @@ if oldToken and oldToken ~= '' then
 end
 redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
 redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[3])
+return 1
+`)
+
+// [M9] deleteTokenScript Lua 脚本原子化 token 删除操作
+// KEYS[1] = token正向映射 key, KEYS[2] = user_token反向映射 key
+// 原子删除两个 key，避免 Pipeline 非原子性导致的"幽灵 token"
+var deleteTokenScript = redis.NewScript(`
+redis.call('DEL', KEYS[1])
+redis.call('DEL', KEYS[2])
 return 1
 `)
 
@@ -82,11 +91,12 @@ func (r *Redis) GetUserIDByToken(ctx context.Context, token string) (int64, erro
 }
 
 // DeleteToken 删除 token（登出时使用）
+// [M9] 改用 Lua 脚本保证原子性，与 SetToken 保持一致
 func (r *Redis) DeleteToken(ctx context.Context, token string, userID int64) error {
-	pipe := r.client.Pipeline()
-	pipe.Del(ctx, "storemicro:token:"+token)
-	pipe.Del(ctx, fmt.Sprintf("storemicro:user_token:%d", userID))
-	_, err := pipe.Exec(ctx)
+	tokenKey := fmt.Sprintf("storemicro:token:%s", token)
+	userTokenKey := fmt.Sprintf("storemicro:user_token:%d", userID)
+
+	_, err := deleteTokenScript.Run(ctx, r.client, []string{tokenKey, userTokenKey}).Result()
 	return err
 }
 

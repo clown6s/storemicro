@@ -44,6 +44,8 @@ var (
 	ErrNameTooLong      = errors.New("real name too long (max 50)")
 	ErrRemarkTooLong    = errors.New("remark too long (max 200)")
 	ErrAvatarTooLong    = errors.New("avatar URL too long (max 500)")
+	ErrInvalidGender    = errors.New("gender must be 0 (unknown), 1 (male), or 2 (female)")
+	ErrInvalidAge       = errors.New("age must be between 0 and 150")
 )
 
 // 手机号和邮箱格式正则
@@ -54,6 +56,14 @@ var (
 	hasLower   = regexp.MustCompile(`[a-z]`)
 	hasDigit   = regexp.MustCompile(`\d`)
 )
+
+// [C3] 用于 timing-safe login 的 dummy bcrypt hash（cost=10, 随机 salt）
+// 每次启动时预计算，登录失败时用这个 hash 做 CompareHashAndPassword 均衡耗时
+var dummyHash []byte
+
+func init() {
+	dummyHash, _ = bcrypt.GenerateFromPassword([]byte("dummy-timing-safe-hash"), bcrypt.DefaultCost)
+}
 
 // User 领域模型（对应数据库 user 表全部字段）
 type User struct {
@@ -77,6 +87,7 @@ type UserRepo interface {
 	GetByPhone(ctx context.Context, phone string) (*User, error)
 	List(ctx context.Context, page, pageSize int32, phone, name string) ([]*User, int64, error)
 	Update(ctx context.Context, user *User) error
+	UpdateTx(ctx context.Context, user *User) error // 事务更新（含唯一性检查）
 	Delete(ctx context.Context, id int64) error
 	RegisterTx(ctx context.Context, user *User) error // 事务注册（含唯一性检查）
 }
@@ -125,8 +136,13 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	if user.Email != "" && !emailRegex.MatchString(user.Email) {
 		return ErrInvalidEmail
 	}
-	if len(user.Phone) > 20 {
-		return ErrInvalidPhone
+	// [M10] Gender 校验：限定 0/1/2
+	if user.Gender < 0 || user.Gender > 2 {
+		return ErrInvalidGender
+	}
+	// [M10] Age 校验：限定 0-150
+	if user.Age < 0 || user.Age > 150 {
+		return ErrInvalidAge
 	}
 	if len(user.RealName) > 50 {
 		return ErrNameTooLong
@@ -170,6 +186,8 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 	user, err := uc.repo.GetByPhone(ctx, phone)
 	if err != nil {
 		zap.L().Warn("login failed: user not found", zap.String("phone", phone), zap.Error(err))
+		// [C3] timing-safe: 即使用户不存在，也对 dummy hash 做 bcrypt 比较，防止通过响应时间差异枚举手机号
+		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
 		return "", nil, ErrWrongCredentials
 	}
 
@@ -272,7 +290,15 @@ func (uc *UserUsecase) Update(ctx context.Context, user *User) error {
 	if user.ID <= 0 {
 		return ErrInvalidUserID
 	}
-	err := uc.repo.Update(ctx, user)
+	// [M10] Gender/Age 校验
+	if user.Gender >= 0 && user.Gender > 2 {
+		return ErrInvalidGender
+	}
+	if user.Age >= 0 && user.Age > 150 {
+		return ErrInvalidAge
+	}
+	// [H7] 邮箱唯一性检查 — 用事务更新
+	err := uc.repo.UpdateTx(ctx, user)
 	if err != nil {
 		return err
 	}

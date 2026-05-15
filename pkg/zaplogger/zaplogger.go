@@ -62,7 +62,11 @@ func New(cfg Config) log.Logger {
 }
 
 // L 返回全局 *zap.Logger，供业务代码直接使用（等同于 zap.L()）
+// [I3] 如果 New() 尚未调用，返回 nop logger 避免空指针 panic
 func L() *zap.Logger {
+	if globalLog == nil {
+		return zap.NewNop()
+	}
 	return globalLog
 }
 

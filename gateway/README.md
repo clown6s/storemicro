@@ -14,7 +14,7 @@
 | `*_grpc.pb.go` | gRPC 客户端接口 | `--go-grpc_out=. --go-grpc_opt=paths=source_relative` |
 | `*.pb.gw.go` | HTTP 路由（grpc-gateway） | `--grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative` |
 
-> **只有 gateway 目录需要 `--grpc-gateway_out`，后端服务（user/product/district）不需要。**
+> **只有 gateway 目录需要 `--grpc-gateway_out`，后端服务（user/district）不需要。**
 
 ---
 
@@ -32,7 +32,7 @@ protoc \
   api/{服务名}/v1/{服务名}.proto
 ```
 
-将 `{服务名}` 替换为实际服务名（如 `user`、`product`、`district`）。
+将 `{服务名}` 替换为实际服务名（如 `user`、`district`）。
 
 ---
 
@@ -41,7 +41,6 @@ protoc \
 | 服务 | gateway 下 proto 路径 | 生成后 .pb.gw.go 路径 |
 |------|----------------------|----------------------|
 | user | `api/user/v1/user.proto` | `api/user/v1/user.pb.gw.go` |
-| product | `api/product/v1/product.proto` | `api/product/v1/product.pb.gw.go` |
 | district | `api/district/v1/district.proto` | `api/district/v1/district.pb.gw.go` |
 
 ---
@@ -79,11 +78,6 @@ protoc \
 ```
 gateway/
 ├── api/
-│   ├── product/v1/
-│   │   ├── product.proto         # 接口定义（源文件）
-│   │   ├── product.pb.go          # protobuf 消息结构（生成）
-│   │   ├── product_grpc.pb.go     # gRPC 客户端接口（生成）
-│   │   └── product.pb.gw.go      # grpc-gateway HTTP 路由（生成）
 │   └── user/v1/
 │       ├── user.proto
 │       ├── user.pb.go
@@ -166,7 +160,6 @@ INFO  storemicro gateway starting  listen=:8080  conf=configs
 INFO  etcd registry connected       endpoints=[10.211.55.5:2379]
 INFO  OTLP tracer initialized      service=storemicro-gateway  endpoint=10.211.55.5:4317
 INFO  service registered           service=user
-INFO  service registered           service=product
 ```
 
 ---
@@ -231,13 +224,11 @@ curl -X POST http://localhost:8080/api/v1/user/logout \
 
 ---
 
-### 商品服务
+### 区域服务
 
 | 方法 | 路径 | 说明 | 是否需要认证 |
 |------|------|------|-------------|
-| `GET` | `/api/v1/product/{id}` | 按 ID 查询商品 | 是 |
-| `GET` | `/api/v1/product/list` | 商品列表（分页） | 是 |
-| `POST` | `/api/v1/product/ping` | 健康检查 | 否（白名单） |
+| `GET` | `/api/v1/district/provinceTree` | 行政区划树 | 是 |
 
 ---
 
@@ -343,10 +334,6 @@ var services = []ServiceRegistration{
         Name:            "user",
         RegisterHandler: userv1.RegisterUserHandler,
     },
-    {
-        Name:            "product",
-        RegisterHandler: productv1.RegisterProductHandler,
-    },
     // 新增：
     {
         Name:            "order",
@@ -383,15 +370,6 @@ protoc \
   --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
   api/user/v1/user.proto
 
-# 重新生成 product proto
-protoc \
-  --proto_path=. \
-  --proto_path=./third_party \
-  --go_out=. --go_opt=paths=source_relative \
-  --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-  --grpc-gateway_out=. --grpc-gateway_opt=paths=source_relative \
-  api/product/v1/product.proto
-
 # 整理依赖
 go mod tidy
 ```
@@ -402,5 +380,5 @@ go mod tidy
 
 - OTLP gRPC 端点：`10.211.55.5:4317`
 - Jaeger UI：`http://10.211.55.5:16686`
-- 服务名：`storemicro-gateway`、`storemicro-user`、`storemicro-product`
-- 请求链：Gateway(HTTP span) → Gateway(gRPC client span) → User/Product(gRPC server span)
+- 服务名：`storemicro-gateway`、`storemicro-user`、`storemicro-district`
+- 请求链：Gateway(HTTP span) → Gateway(gRPC client span) → User/District(gRPC server span)

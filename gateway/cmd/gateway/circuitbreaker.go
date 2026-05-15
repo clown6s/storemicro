@@ -20,14 +20,19 @@ type cbStore struct {
 	cfg *CircuitBreakerConfig
 }
 
-var globalCB *cbStore
+var (
+	globalCB   *cbStore
+	initCBOnce sync.Once // [I5] 防止重复初始化
+)
 
 // initCBStore 初始化熔断器存储（应用启动时调用一次）
 func initCBStore(cfg *CircuitBreakerConfig) {
-	globalCB = &cbStore{
-		cbs: make(map[string]*gobreaker.CircuitBreaker),
-		cfg: cfg,
-	}
+	initCBOnce.Do(func() {
+		globalCB = &cbStore{
+			cbs: make(map[string]*gobreaker.CircuitBreaker),
+			cfg: cfg,
+		}
+	})
 }
 
 // getCB 获取指定服务的熔断器（不存在则创建）

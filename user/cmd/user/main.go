@@ -101,7 +101,7 @@ func main() {
 	// 创建 etcd client 和 registrar（带重试）
 	var etcdClient *clientv3.Client
 	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "etcd",
-		func() error {
+		func(rCtx context.Context) error {
 			var err error
 			etcdClient, err = clientv3.New(clientv3.Config{
 				Endpoints:   bc.Registry.Etcd.Endpoints,

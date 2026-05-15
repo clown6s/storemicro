@@ -5,7 +5,6 @@ import (
 
 	"district/internal/conf"
 
-	"github.com/go-kratos/kratos/v2/log"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/wire"
 	pkgdb "github.com/storemicro/pkg/dbutil"
@@ -21,7 +20,7 @@ type Data struct {
 }
 
 // NewData 创建 Data 实例（使用共享的 dbutil 连接池和重试逻辑）
-func NewData(c *conf.Data, logger log.Logger) (*Data, func(), error) {
+func NewData(c *conf.Data) (*Data, func(), error) {
 	pool := pkgdb.DefaultPool()
 	if c.Database.MaxOpenConns > 0 {
 		pool.MaxOpenConns = int(c.Database.MaxOpenConns)
@@ -33,7 +32,7 @@ func NewData(c *conf.Data, logger log.Logger) (*Data, func(), error) {
 		pool.ConnMaxLifetime = int(c.Database.ConnMaxLifetime)
 	}
 
-	db, err := pkgdb.Connect("mysql", c.Database.Source, pool, logger)
+	db, err := pkgdb.Connect("mysql", c.Database.Source, pool)
 	if err != nil {
 		return nil, nil, err
 	}

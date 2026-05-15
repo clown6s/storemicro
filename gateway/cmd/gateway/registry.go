@@ -2,7 +2,6 @@ package main
 
 import (
 	districtv1 "gateway/api/district/v1"
-	productv1 "gateway/api/product/v1"
 	userv1 "gateway/api/user/v1"
 )
 
@@ -11,10 +10,6 @@ var services = []ServiceRegistration{
 	{
 		Name:            "user",
 		RegisterHandler: userv1.RegisterUserHandler,
-	},
-	{
-		Name:            "product",
-		RegisterHandler: productv1.RegisterProductHandler,
 	},
 	{
 		Name:            "district",

@@ -20,7 +20,7 @@
 
 | 服务 | 需要生成的文件 | 是否需要 --grpc-gateway_out |
 |------|---------------|------------------------------|
-| **user / product / district**（后端 gRPC 服务） | `*.pb.go` + `*_grpc.pb.go` | ❌ 不需要 |
+| **user / district**（后端 gRPC 服务） | `*.pb.go` + `*_grpc.pb.go` | ❌ 不需要 |
 | **gateway**（HTTP 网关） | `*.pb.go` + `*_grpc.pb.go` + `*.pb.gw.go` | ✅ 必须加 |
 
 ---

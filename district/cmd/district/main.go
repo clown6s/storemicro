@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 
 	"district/internal/conf"
 	zaplog "district/internal/pkg/log"
+	stdlog "log"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	pkgretry "github.com/storemicro/pkg/retry"
@@ -45,6 +47,9 @@ func main() {
 	if confPath == "" {
 		confPath = resolveConfDir()
 	}
+
+	// 抑制 Kratos config.Load() 内部标准库 log 的 DEBUG 输出
+	stdlog.SetOutput(io.Discard)
 
 	c := config.New(
 		config.WithSource(
@@ -102,7 +107,7 @@ func main() {
 	// 创建 etcd client 和 registrar（带重试）
 	var etcdClient *clientv3.Client
 	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "etcd",
-		func() error {
+		func(rCtx context.Context) error {
 			var err error
 			etcdClient, err = clientv3.New(clientv3.Config{
 				Endpoints:   bc.Registry.Etcd.Endpoints,

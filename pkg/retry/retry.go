@@ -3,6 +3,7 @@ package retry
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"time"
 
 	"go.uber.org/zap"
@@ -30,15 +31,21 @@ func DefaultConfig() Config {
 	}
 }
 
-// Do 执行带指数退避的重试逻辑。
+// Do 执行带指数退避 + 随机抖动的重试逻辑。
+// fn 接收 context，可在内部使用 ctx 做超时/取消控制。
 // fn 应该在成功时返回 nil，在需要重试时返回 error。
 // 超过 MaxAttempts 后返回最后一次的 error。
-func Do(ctx context.Context, cfg Config, name string, fn func() error) error {
+func Do(ctx context.Context, cfg Config, name string, fn func(ctx context.Context) error) error {
+	// [L6] MaxAttempts 校验
+	if cfg.MaxAttempts < 1 {
+		return fmt.Errorf("%s: MaxAttempts must be >= 1, got %d", name, cfg.MaxAttempts)
+	}
+
 	var lastErr error
 	backoff := cfg.InitialBackoff
 
 	for attempt := 1; attempt <= cfg.MaxAttempts; attempt++ {
-		lastErr = fn()
+		lastErr = fn(ctx)
 		if lastErr == nil {
 			if attempt > 1 {
 				zap.L().Info("retry success",
@@ -68,7 +75,9 @@ func Do(ctx context.Context, cfg Config, name string, fn func() error) error {
 		case <-time.After(backoff):
 		}
 
-		backoff = time.Duration(float64(backoff) * cfg.BackoffMultiplier)
+		// [L5] 指数退避 + 随机抖动（防止惊群效应）
+		jitter := time.Duration(rand.Float64() * 0.2 * float64(backoff))
+		backoff = time.Duration(float64(backoff)*cfg.BackoffMultiplier) + jitter
 		if backoff > cfg.MaxBackoff {
 			backoff = cfg.MaxBackoff
 		}

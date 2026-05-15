@@ -34,6 +34,15 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 	if len(districts) == 0 {
+		// [M4] 区分空查询（adCode 为空）与未找到（adCode 指定但不存在）
+		if req.AdCode == "" {
+			// 全量查询结果为空，返回 OK + 空数组
+			return &districtv1.GetProvinceTreeResp{
+				Code:    200,
+				Message: "success",
+				Data:    []*districtv1.DistrictTree{},
+			}, nil
+		}
 		return nil, status.Errorf(codes.NotFound, "district not found: %s", req.AdCode)
 	}
 

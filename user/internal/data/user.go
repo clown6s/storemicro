@@ -96,7 +96,8 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 	err := r.data.db.QueryRowContext(ctx, countSQL, args...).Scan(&total)
 	if err != nil {
 		zap.L().Error("userRepo.List count failed", zap.Error(err))
-		return nil, 0, err
+		// [M8] 统一错误包装
+		return nil, 0, fmt.Errorf("count users failed: %w", err)
 	}
 
 	// 分页查询（int64 防止溢出）
@@ -112,7 +113,8 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 	rows, err := r.data.db.QueryContext(ctx, querySQL, queryArgs...)
 	if err != nil {
 		zap.L().Error("userRepo.List query failed", zap.Error(err))
-		return nil, 0, err
+		// [M8] 统一错误包装
+		return nil, 0, fmt.Errorf("query users failed: %w", err)
 	}
 	defer rows.Close()
 
@@ -122,7 +124,8 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 		if err := rows.Scan(&user.ID, &user.RealName, &user.Avatar, &user.Gender, &user.Age,
 			&user.Phone, &user.Email, &user.CreateTime, &user.UpdateTime, &user.Remark); err != nil {
 			zap.L().Error("userRepo.List scan failed", zap.Error(err))
-			return nil, 0, err
+			// [M8] 统一错误包装
+			return nil, 0, fmt.Errorf("scan user row failed: %w", err)
 		}
 		users = append(users, user)
 	}
@@ -174,7 +177,8 @@ func (r *userRepo) Update(ctx context.Context, user *biz.User) error {
 	result, err := r.data.db.ExecContext(ctx, query, args...)
 	if err != nil {
 		zap.L().Error("userRepo.Update failed", zap.Int64("id", user.ID), zap.Error(err))
-		return err
+		// [M8] 统一错误包装
+		return fmt.Errorf("update user failed: %w", err)
 	}
 
 	affected, _ := result.RowsAffected()
@@ -182,6 +186,87 @@ func (r *userRepo) Update(ctx context.Context, user *biz.User) error {
 		zap.L().Warn("userRepo.Update no rows affected", zap.Int64("id", user.ID))
 		return biz.ErrUserNotFound
 	}
+	return nil
+}
+
+// UpdateTx 事务更新：动态 SET + 邮箱唯一性检查原子操作 [H7]
+func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
+	tx, err := r.data.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx failed: %w", err)
+	}
+	defer func() {
+		if err != nil {
+			tx.Rollback()
+		}
+	}()
+
+	// [H7] 邮箱唯一性检查（如果提供了新邮箱）
+	if user.Email != "" {
+		var emailCount int
+		err = tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM user WHERE email = ? AND id != ? AND (deleted_at IS NULL OR deleted_at = '')`,
+			user.Email, user.ID,
+		).Scan(&emailCount)
+		if err != nil {
+			return fmt.Errorf("check email uniqueness failed: %w", err)
+		}
+		if emailCount > 0 {
+			return biz.ErrEmailExists
+		}
+	}
+
+	// 动态构建 SET 子句
+	var setClauses []string
+	var args []any
+
+	if user.RealName != "" {
+		setClauses = append(setClauses, "real_name = ?")
+		args = append(args, user.RealName)
+	}
+	if user.Avatar != "" {
+		setClauses = append(setClauses, "avatar = ?")
+		args = append(args, user.Avatar)
+	}
+	if user.Gender >= 0 {
+		setClauses = append(setClauses, "gender = ?")
+		args = append(args, user.Gender)
+	}
+	if user.Age >= 0 {
+		setClauses = append(setClauses, "age = ?")
+		args = append(args, user.Age)
+	}
+	if user.Email != "" {
+		setClauses = append(setClauses, "email = ?")
+		args = append(args, user.Email)
+	}
+	if user.Remark != "" {
+		setClauses = append(setClauses, "remark = ?")
+		args = append(args, user.Remark)
+	}
+
+	if len(setClauses) == 0 {
+		zap.L().Debug("userRepo.UpdateTx: no fields to update", zap.Int64("id", user.ID))
+		return nil
+	}
+
+	args = append(args, user.ID)
+	query := fmt.Sprintf("UPDATE user SET %s WHERE id = ?", strings.Join(setClauses, ", "))
+
+	result, err := tx.ExecContext(ctx, query, args...)
+	if err != nil {
+		return fmt.Errorf("update user failed: %w", err)
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return biz.ErrUserNotFound
+	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx failed: %w", err)
+	}
+
 	return nil
 }
 
@@ -194,7 +279,8 @@ func (r *userRepo) Delete(ctx context.Context, id int64) error {
 	)
 	if err != nil {
 		zap.L().Error("userRepo.Delete failed", zap.Int64("id", id), zap.Error(err))
-		return err
+		// [M8] 统一错误包装
+		return fmt.Errorf("delete user failed: %w", err)
 	}
 
 	affected, _ := result.RowsAffected()

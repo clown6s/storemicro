@@ -30,7 +30,23 @@ var (
 	// 租约丢失且无法重新获取时，nodeReady 设为 false，GenID() 将直接报错而非生成冲突 ID
 	nodeReady bool
 	readyMu   sync.RWMutex
+
+	// [L2] 用于通知后台 goroutine 优雅退出的 cancel
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
+	shutdownOnce   sync.Once
 )
+
+func init() {
+	shutdownCtx, shutdownCancel = context.WithCancel(context.Background())
+}
+
+// Shutdown 通知所有 snowflake 后台 goroutine 退出，应在进程关闭时调用
+func Shutdown() {
+	shutdownOnce.Do(func() {
+		shutdownCancel()
+	})
+}
 
 // InitWithEtcd 通过 etcd 自动分配唯一的 node_id
 // 启动时从 0 遍历到 1023，尝试抢锁，抢到第一个可用的即作为本实例的 node_id
@@ -38,7 +54,6 @@ var (
 func InitWithEtcd(etcdClient *clientv3.Client, serviceName string) error {
 	ctx := context.Background()
 
-	// 遍历 0-1023，找到第一个未被占用或租约已过期的 node_id
 	for i := 0; i <= maxNodeID; i++ {
 		key := fmt.Sprintf("%s%s/%d", keyPrefix, serviceName, i)
 
@@ -63,6 +78,8 @@ func InitWithEtcd(etcdClient *clientv3.Client, serviceName string) error {
 			var sfNode *sf.Node
 			sfNode, err = sf.NewNode(int64(i))
 			if err != nil {
+				// [L1] 抢到但初始化失败，释放 lease
+				_, _ = etcdClient.Revoke(ctx, lease.ID)
 				return fmt.Errorf("snowflake: create node failed: %w", err)
 			}
 			node = sfNode
@@ -81,8 +98,8 @@ func InitWithEtcd(etcdClient *clientv3.Client, serviceName string) error {
 			return nil
 		}
 
-		// 没抢到，继续尝试下一个
-		_ = lease
+		// [L1] 没抢到，释放不再需要的 lease
+		_, _ = etcdClient.Revoke(ctx, lease.ID)
 	}
 
 	return fmt.Errorf("snowflake: no available node_id (all 0-%d are occupied)", maxNodeID)
@@ -90,7 +107,7 @@ func InitWithEtcd(etcdClient *clientv3.Client, serviceName string) error {
 
 // keepAlive 后台续约租约，实例退出或崩溃时租约自动过期，node_id 被释放
 func keepAlive(etcdClient *clientv3.Client, leaseID clientv3.LeaseID, key string) {
-	ctx := context.Background()
+	ctx := shutdownCtx
 
 	ch, err := etcdClient.KeepAlive(ctx, leaseID)
 	if err != nil {
@@ -101,6 +118,10 @@ func keepAlive(etcdClient *clientv3.Client, leaseID clientv3.LeaseID, key string
 	// 消费 keep-alive 响应通道
 	for {
 		select {
+		case <-ctx.Done():
+			// [L2] 进程关闭，退出 goroutine
+			zap.L().Info("snowflake: keep-alive goroutine exiting (shutdown)")
+			return
 		case resp, ok := <-ch:
 			if !ok {
 				zap.L().Warn("snowflake: keep-alive channel closed, disabling GenID until lease is re-acquired")
@@ -118,10 +139,18 @@ func keepAlive(etcdClient *clientv3.Client, leaseID clientv3.LeaseID, key string
 
 // retryKeepAlive 租约丢失后尝试重新抢锁
 func retryKeepAlive(etcdClient *clientv3.Client, key string) {
+	ctx := shutdownCtx
+
 	for {
+		select {
+		case <-ctx.Done():
+			// [L2] 进程关闭，退出重试循环
+			return
+		default:
+		}
+
 		time.Sleep(5 * time.Second)
 
-		ctx := context.Background()
 		lease, err := etcdClient.Grant(ctx, leaseTTL)
 		if err != nil {
 			zap.L().Error("snowflake: retry grant failed", zap.Error(err))
@@ -135,6 +164,8 @@ func retryKeepAlive(etcdClient *clientv3.Client, key string) {
 		resp, err := txn.Commit()
 		if err != nil {
 			zap.L().Error("snowflake: retry txn failed", zap.Error(err))
+			// [L1] 释放失败的 lease
+			_, _ = etcdClient.Revoke(ctx, lease.ID)
 			continue
 		}
 
@@ -142,11 +173,14 @@ func retryKeepAlive(etcdClient *clientv3.Client, key string) {
 			ch, err := etcdClient.KeepAlive(ctx, lease.ID)
 			if err != nil {
 				zap.L().Error("snowflake: retry keep-alive failed", zap.Error(err))
+				_, _ = etcdClient.Revoke(ctx, lease.ID)
 				continue
 			}
 			go func() {
 				for {
 					select {
+					case <-ctx.Done():
+						return
 					case _, ok := <-ch:
 						if !ok {
 							readyMu.Lock()
@@ -165,7 +199,8 @@ func retryKeepAlive(etcdClient *clientv3.Client, key string) {
 			return
 		}
 
-		// key 被别人占了，放弃重试（说明本实例可能已经不再持有这个 node_id）
+		// key 被别人占了，释放 lease
+		_, _ = etcdClient.Revoke(ctx, lease.ID)
 		// nodeReady 保持 false，GenID() 将直接报错
 		zap.L().Error("snowflake: failed to re-acquire node_id, GenID is permanently disabled - please restart instance")
 		return

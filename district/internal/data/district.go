@@ -25,11 +25,32 @@ func (d districtRepo) Get(ctx context.Context, adCode string) ([]*biz.District, 
 	)
 
 	if adCode != "" {
+		// [M1] 修复：CTE 分两步
+		// 1. 向上回溯找到根节点（省级）
+		// 2. 从根节点向下遍历所有子节点
 		query = `
-WITH RECURSIVE district_tree AS (
+WITH RECURSIVE ancestors AS (
+    -- 向上回溯：从给定节点找到省级根节点
     SELECT id, parent_adcode, adcode, name, level, center
     FROM district
     WHERE adcode = ?
+    UNION ALL
+    SELECT d.id, d.parent_adcode, d.adcode, d.name, d.level, d.center
+    FROM district d
+    INNER JOIN ancestors a ON d.adcode = a.parent_adcode
+    WHERE a.level != 'country'
+),
+root AS (
+    -- 取到最顶层的省级行政区
+    SELECT id, parent_adcode, adcode, name, level, center
+    FROM ancestors
+    WHERE parent_adcode = '100000' OR level = 'province'
+    LIMIT 1
+),
+district_tree AS (
+    -- 从根节点向下遍历所有子节点
+    SELECT r.id, r.parent_adcode, r.adcode, r.name, r.level, r.center
+    FROM root r
     UNION ALL
     SELECT d.id, d.parent_adcode, d.adcode, d.name, d.level, d.center
     FROM district d

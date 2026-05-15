@@ -70,9 +70,24 @@ var noAuthRoutes = map[string]struct{}{
 	"POST /api/v1/user/register": {},
 	"POST /api/v1/user/login":    {},
 	"POST /api/v1/user/ping":     {},
-	"POST /api/v1/product/ping":  {},
 	"GET /healthz":               {},
 }
+
+// [H2] rateLimitScript Lua 脚本原子化限流操作
+// KEYS[1] = 限流 key
+// ARGV[1] = 窗口起始时间（毫秒），ARGV[2] = 当前时间（毫秒），ARGV[3] = 最大请求数，ARGV[4] = 过期秒数
+// 流程：清理过期成员 → 统计窗口内请求数 → 添加新请求 → 设置过期
+// 全部在 Lua 中原子执行，避免 Pipeline 非原子竞态
+var rateLimitScript = redis.NewScript(`
+redis.call('ZREMRANGEBYSCORE', KEYS[1], '0', ARGV[1])
+local count = redis.call('ZCARD', KEYS[1])
+if tonumber(count) >= tonumber(ARGV[3]) then
+    return count
+end
+redis.call('ZADD', KEYS[1], ARGV[2], ARGV[2] .. '-' .. math.random(1000000))
+redis.call('EXPIRE', KEYS[1], ARGV[4])
+return count + 1
+`)
 
 type redisRateLimiter struct {
 	rdb         *redis.Client
@@ -92,12 +107,14 @@ func (rl *redisRateLimiter) allow(ctx context.Context, key string) bool {
 	now := time.Now().UnixMilli()
 	windowStart := now - rl.windowSec*1000
 
-	pipe := rl.rdb.Pipeline()
-	pipe.ZRemRangeByScore(ctx, key, "0", strconv.FormatInt(windowStart, 10))
-	countCmd := pipe.ZCard(ctx, key)
-	pipe.ZAdd(ctx, key, redis.Z{Score: float64(now), Member: now})
-	pipe.Expire(ctx, key, time.Duration(rl.windowSec)*time.Second)
-	_, err := pipe.Exec(ctx)
+	// [M13] Member 使用 时间戳-随机数 保证唯一性
+	result, err := rateLimitScript.Run(ctx, rl.rdb,
+		[]string{key},
+		strconv.FormatInt(windowStart, 10),
+		strconv.FormatInt(now, 10),
+		strconv.FormatInt(rl.maxRequests, 10),
+		strconv.FormatInt(rl.windowSec, 10),
+	).Int64()
 
 	if err != nil {
 		pkglog.L().Error("rate limiter redis error, fail-closed",
@@ -106,7 +123,7 @@ func (rl *redisRateLimiter) allow(ctx context.Context, key string) bool {
 		)
 		return false
 	}
-	return countCmd.Val() < rl.maxRequests
+	return result <= rl.maxRequests
 }
 
 func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next http.Handler) http.Handler {

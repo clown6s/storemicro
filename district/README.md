@@ -92,7 +92,7 @@ district/
 
 | 服务类型 | 需要生成的文件 | 生成命令 |
 |---------|--------------|---------|
-| **district / user / product**（后端 gRPC 服务） | `*.pb.go` + `*_grpc.pb.go` | 不需要 `--grpc-gateway_out` |
+| **district / user**（后端 gRPC 服务） | `*.pb.go` + `*_grpc.pb.go` | 不需要 `--grpc-gateway_out` |
 | **gateway**（HTTP 网关） | `*.pb.go` + `*_grpc.pb.go` + `*.pb.gw.go` | **必须**加 `--grpc-gateway_out` |
 
 ---
@@ -221,10 +221,6 @@ var services = []ServiceRegistration{
     {
         Name:            "user",
         RegisterHandler: userv1.RegisterUserHandler,
-    },
-    {
-        Name:            "product",
-        RegisterHandler: productv1.RegisterProductHandler,
     },
     // 新增 district 服务：
     {

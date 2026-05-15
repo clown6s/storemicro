@@ -149,6 +149,7 @@ var envPattern = regexp.MustCompile(`\$\{(\w+):([^}]*)\}`)
 
 func expandEnv(s string) string {
 	// 先处理 ${VAR:default} 格式
+	// 注意：引号由 YAML 模板控制，此处不做自动加引号，避免与已有引号冲突
 	s = envPattern.ReplaceAllStringFunc(s, func(match string) string {
 		sub := envPattern.FindStringSubmatch(match)
 		if val, ok := os.LookupEnv(sub[1]); ok {

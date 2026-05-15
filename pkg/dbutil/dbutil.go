@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/go-kratos/kratos/v2/log"
 	pkgretry "github.com/storemicro/pkg/retry"
 	"go.uber.org/zap"
 )
@@ -28,7 +27,7 @@ func DefaultPool() DefaultPoolConfig {
 }
 
 // Connect 创建并验证 MySQL 连接（带重试和连接池配置）
-func Connect(driver, dsn string, pool DefaultPoolConfig, logger log.Logger) (*sql.DB, error) {
+func Connect(driver, dsn string, pool DefaultPoolConfig) (*sql.DB, error) {
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database failed: %w", err)
@@ -50,10 +49,13 @@ func Connect(driver, dsn string, pool DefaultPoolConfig, logger log.Logger) (*sq
 	db.SetConnMaxLifetime(time.Duration(pool.ConnMaxLifetime) * time.Second)
 	db.SetConnMaxIdleTime(time.Duration(pool.ConnMaxLifetime/2) * time.Second) // 空闲连接最大存活时间为最大生命周期的半
 
-	// 带重试的 MySQL 连接验证
-	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "mysql",
-		func() error {
-			return db.PingContext(context.Background())
+	// [C5] 带可取消 context 的 MySQL 连接验证
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	if err := pkgretry.Do(ctx, pkgretry.DefaultConfig(), "mysql",
+		func(rCtx context.Context) error {
+			return db.PingContext(rCtx)
 		},
 	); err != nil {
 		db.Close()
