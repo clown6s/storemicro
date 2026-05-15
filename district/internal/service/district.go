@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sort"
 
 	districtv1 "district/api/district/v1"
@@ -30,6 +31,9 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 
 	districts, err := d.uc.Get(ctx, req.AdCode)
 	if err != nil {
+		if errors.Is(err, biz.ErrInvalidAdCode) {
+			return nil, status.Error(codes.InvalidArgument, err.Error())
+		}
 		zap.L().Error("GetProvinceTree failed", zap.String("adCode", req.AdCode), zap.Error(err))
 		return nil, status.Error(codes.Internal, "internal error")
 	}

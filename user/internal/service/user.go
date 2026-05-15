@@ -138,12 +138,12 @@ func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (
 
 // ---- 辅助方法 ----
 
-// toUserInfo 将 biz.User 转换为 proto UserInfo（不含密码）
+// toUserInfo 将 biz.User 转换为 proto UserInfo（不含密码，手机号脱敏）
 func (s *UserService) toUserInfo(u *biz.User) *userv1.UserInfo {
 	return &userv1.UserInfo{
 		Id:         u.ID,
 		Email:      u.Email,
-		Phone:      u.Phone,
+		Phone:      pkgstr.MaskPhone(u.Phone),
 		RealName:   u.RealName,
 		Avatar:     u.Avatar,
 		Gender:     u.Gender,
@@ -179,6 +179,7 @@ func (s *UserService) mapError(err error) error {
 		errors.Is(err, biz.ErrNameTooLong),
 		errors.Is(err, biz.ErrRemarkTooLong),
 		errors.Is(err, biz.ErrAvatarTooLong),
+		errors.Is(err, biz.ErrEmailTooLong),
 		errors.Is(err, biz.ErrInvalidGender),
 		errors.Is(err, biz.ErrInvalidAge):
 		return status.Error(codes.InvalidArgument, err.Error())

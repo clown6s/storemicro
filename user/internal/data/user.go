@@ -74,6 +74,17 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 		zap.String("phone", pkgstr.MaskPhone(phone)), zap.String("name", name),
 	)
 
+	// 防御性校验
+	if page <= 0 {
+		page = 1
+	}
+	if pageSize <= 0 {
+		pageSize = 10
+	}
+	if pageSize > 100 {
+		pageSize = 100
+	}
+
 	// 动态拼接 WHERE 条件
 	var conditions []string
 	var args []any
@@ -81,11 +92,11 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 	conditions = append(conditions, "(deleted_at IS NULL OR deleted_at = '')")
 
 	if phone != "" {
-		conditions = append(conditions, "phone LIKE ?")
+		conditions = append(conditions, "phone LIKE ? ESCAPE '\\\\'")
 		args = append(args, "%"+escapeLike(phone)+"%")
 	}
 	if name != "" {
-		conditions = append(conditions, "real_name LIKE ?")
+		conditions = append(conditions, "real_name LIKE ? ESCAPE '\\\\'")
 		args = append(args, "%"+escapeLike(name)+"%")
 	}
 
@@ -134,60 +145,10 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 	return users, total, rows.Err()
 }
 
+// Update 已废弃：请使用 UpdateTx（包含邮箱唯一性检查的事务更新）
+// 保留此方法以保持接口兼容，内部直接调用 UpdateTx
 func (r *userRepo) Update(ctx context.Context, user *biz.User) error {
-	zap.L().Debug("userRepo.Update", zap.Int64("id", user.ID))
-
-	// 动态构建 SET 子句：只更新实际传入了值的字段
-	// 约定：string 字段空值不更新，int32 字段 < 0 表示不更新（0 是有效值）
-	var setClauses []string
-	var args []any
-
-	if user.RealName != "" {
-		setClauses = append(setClauses, "real_name = ?")
-		args = append(args, user.RealName)
-	}
-	if user.Avatar != "" {
-		setClauses = append(setClauses, "avatar = ?")
-		args = append(args, user.Avatar)
-	}
-	if user.Gender >= 0 {
-		setClauses = append(setClauses, "gender = ?")
-		args = append(args, user.Gender)
-	}
-	if user.Age >= 0 {
-		setClauses = append(setClauses, "age = ?")
-		args = append(args, user.Age)
-	}
-	if user.Email != "" {
-		setClauses = append(setClauses, "email = ?")
-		args = append(args, user.Email)
-	}
-	if user.Remark != "" {
-		setClauses = append(setClauses, "remark = ?")
-		args = append(args, user.Remark)
-	}
-
-	if len(setClauses) == 0 {
-		zap.L().Debug("userRepo.Update: no fields to update", zap.Int64("id", user.ID))
-		return nil
-	}
-
-	args = append(args, user.ID)
-	query := fmt.Sprintf("UPDATE user SET %s WHERE id = ? AND (deleted_at IS NULL OR deleted_at = '')", strings.Join(setClauses, ", "))
-
-	result, err := r.data.db.ExecContext(ctx, query, args...)
-	if err != nil {
-		zap.L().Error("userRepo.Update failed", zap.Int64("id", user.ID), zap.Error(err))
-		// [M8] 统一错误包装
-		return fmt.Errorf("update user failed: %w", err)
-	}
-
-	affected, _ := result.RowsAffected()
-	if affected == 0 {
-		zap.L().Warn("userRepo.Update no rows affected", zap.Int64("id", user.ID))
-		return biz.ErrUserNotFound
-	}
-	return nil
+	return r.UpdateTx(ctx, user)
 }
 
 // UpdateTx 事务更新：动态 SET + 邮箱唯一性检查原子操作 [H7]

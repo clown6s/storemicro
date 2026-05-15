@@ -46,6 +46,7 @@ var (
 	ErrNameTooLong      = errors.New("real name too long (max 50)")
 	ErrRemarkTooLong    = errors.New("remark too long (max 200)")
 	ErrAvatarTooLong    = errors.New("avatar URL too long (max 500)")
+	ErrEmailTooLong     = errors.New("email too long (max 254)")
 	ErrInvalidGender    = errors.New("gender must be 0 (unknown), 1 (male), or 2 (female)")
 	ErrInvalidAge       = errors.New("age must be between 0 and 150")
 )
@@ -139,8 +140,13 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	if !hasDigit.MatchString(user.Password) {
 		return ErrPasswordNoDigit
 	}
-	if user.Email != "" && !emailRegex.MatchString(user.Email) {
-		return ErrInvalidEmail
+	if user.Email != "" {
+		if len(user.Email) > 254 {
+			return ErrEmailTooLong
+		}
+		if !emailRegex.MatchString(user.Email) {
+			return ErrInvalidEmail
+		}
 	}
 	// [M10] Gender 校验：限定 0/1/2
 	if user.Gender < 0 || user.Gender > 2 {

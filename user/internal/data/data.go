@@ -54,8 +54,10 @@ func NewData(c *conf.Data, r *redis.Redis) (*Data, func(), error) {
 	db.SetConnMaxLifetime(connMaxLifetime)
 	db.SetConnMaxIdleTime(connMaxLifetime / 2) // 空闲连接最大存活时间为最大生命周期的二分之一
 
-	// 带重试的 MySQL 连接验证（5 次指数退避）
-	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "mysql",
+	// 带重试的 MySQL 连接验证（5 次指数退避，60s 总超时）
+	retryCtx, retryCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer retryCancel()
+	if err := pkgretry.Do(retryCtx, pkgretry.DefaultConfig(), "mysql",
 		func(rCtx context.Context) error {
 			return db.PingContext(rCtx)
 		},

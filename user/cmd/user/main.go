@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	stdlog "log"
@@ -103,7 +105,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer func() {
-		if err := shutdown(context.Background()); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdown(ctx); err != nil {
 			helper.Errorf("failed to shutdown jaeger tracer: %v", err)
 		}
 	}()
@@ -132,6 +136,7 @@ func main() {
 		helper.Errorf("failed to init snowflake: %v", err)
 		os.Exit(1)
 	}
+	defer snowflake.Shutdown()
 	helper.Infow("msg", "snowflake initialized", "node_id", snowflake.NodeID)
 
 	app, appData, cleanup, err := wireApp(bc.Server, bc.Data, bc.Jwt, bc.Redis, zapLogger, reg)
@@ -237,12 +242,18 @@ func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *htt
 		w.WriteHeader(code)
 		_, _ = w.Write(b)
 	})
-	mux.Handle("/metrics", promhttp.Handler())
+	// Prometheus metrics 端点（可选 Bearer token 认证）
+	metricsHandler := http.Handler(promhttp.Handler())
+	if metricsPassword := os.Getenv("METRICS_PASSWORD"); metricsPassword != "" {
+		metricsHandler = metricsBearerAuth(promhttp.Handler(), metricsPassword)
+	}
+	mux.Handle("/metrics", metricsHandler)
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      mux,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
+		IdleTimeout:  30 * time.Second,
 	}
 	helper.Infow("msg", "health server starting", "addr", addr)
 	go func() {
@@ -251,4 +262,25 @@ func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *htt
 		}
 	}()
 	return srv
+}
+
+// metricsBearerAuth 包装 handler，要求 Bearer token 才放行（timing-safe 比较）
+func metricsBearerAuth(next http.Handler, password string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if !strings.HasPrefix(auth, "Bearer ") {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
+			return
+		}
+		token := strings.TrimPrefix(auth, "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(token), []byte(password)) != 1 {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

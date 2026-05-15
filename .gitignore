@@ -24,8 +24,11 @@ logs/
 # Protoc generated (keep pb.go in repo, exclude intermediate)
 *.pb.bin
 
+# Environment files (may contain secrets)
+**/.env
+**/.env.*
+
 # Config files with secrets (use config.yaml.example as template)
-# Uncomment the lines below when deploying to production:
-# district/configs/config.yaml
-# user/configs/config.yaml
-# gateway/configs/config.yaml
+district/configs/config.yaml
+user/configs/config.yaml
+gateway/configs/config.yaml

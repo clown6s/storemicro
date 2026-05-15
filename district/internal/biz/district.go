@@ -2,12 +2,19 @@ package biz
 
 import (
 	"context"
+	"errors"
+	"regexp"
 
 	"github.com/google/wire"
 )
 
 // ProviderSet is biz providers.
 var ProviderSet = wire.NewSet(NewDistrictUseCase)
+
+// adCodeRegex 中国行政区划代码：6 位数字（如 110000）
+var adCodeRegex = regexp.MustCompile(`^\d{6}$`)
+
+var ErrInvalidAdCode = errors.New("invalid ad_code format, expected 6 digits")
 
 // District 行政区领域模型
 type District struct {
@@ -36,5 +43,8 @@ func NewDistrictUseCase(repo DistrictRepo) *DistrictUseCase {
 }
 
 func (u *DistrictUseCase) Get(ctx context.Context, adCode string) ([]*District, error) {
+	if adCode != "" && !adCodeRegex.MatchString(adCode) {
+		return nil, ErrInvalidAdCode
+	}
 	return u.repo.Get(ctx, adCode)
 }

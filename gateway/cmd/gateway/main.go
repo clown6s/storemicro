@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -61,7 +62,9 @@ func main() {
 		os.Exit(1)
 	}
 	defer func() {
-		if err := shutdown(context.Background()); err != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := shutdown(ctx); err != nil {
 			pkglog.L().Error("failed to shutdown jaeger tracer", zap.Error(err))
 		}
 	}()
@@ -73,13 +76,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 创建 HTTP 服务器（生产级超时配置）
+	// 创建 HTTP 服务器（生产级超时配置 + 请求体大小限制）
 	srv := &http.Server{
-		Addr:         appCfg.Server.Addr,
-		Handler:      newRootMux(proxy, appCfg.MetricsPassword),
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		Addr:           appCfg.Server.Addr,
+		Handler:        limitRequestBody(newRootMux(proxy, appCfg.MetricsPassword), 10<<20),
+		ReadTimeout:    30 * time.Second,
+		WriteTimeout:   60 * time.Second,
+		IdleTimeout:    120 * time.Second,
+		MaxHeaderBytes: 1 << 20,
 	}
 
 	pkglog.L().Info("storemicro gateway starting",
@@ -104,15 +108,16 @@ func main() {
 
 	pkglog.L().Info("gateway shutting down...")
 
-	// 先关闭 proxy 连接（gRPC/Redis/etcd），停止接收新请求
-	proxy.Close()
-
+	// 先优雅关闭 HTTP 服务器（等待在途请求完成），再关闭后端连接
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
 		pkglog.L().Error("gateway forced shutdown", zap.Error(err))
 	}
+
+	// 所有在途请求完成后，关闭后端连接
+	proxy.Close()
 
 	pkglog.L().Info("gateway stopped")
 }
@@ -133,10 +138,13 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		checks := map[string]string{}
 
-		// Redis
-		if err := proxy.rdb.Ping(r.Context()).Err(); err != nil {
+		// Redis（显式 3s 超时）
+		redisCtx, redisCancel := context.WithTimeout(r.Context(), 3*time.Second)
+		if err := proxy.rdb.Ping(redisCtx).Err(); err != nil {
+			redisCancel()
 			checks["redis"] = "unhealthy: " + err.Error()
 		} else {
+			redisCancel()
 			checks["redis"] = "ok"
 		}
 
@@ -212,17 +220,31 @@ func loadDotenv() {
 	}
 }
 
-// basicAuth 包装 handler，要求 Authorization header 中带 "Bearer {password}" 才放行
+// basicAuth 包装 handler，要求 Authorization header 中带 "Bearer {password}" 才放行（timing-safe 比较）
 func basicAuth(next http.Handler, password string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		auth := r.Header.Get("Authorization")
-		token := strings.TrimPrefix(auth, "Bearer ")
-		if token != password {
+		if !strings.HasPrefix(auth, "Bearer ") {
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
 			return
 		}
+		token := strings.TrimPrefix(auth, "Bearer ")
+		if subtle.ConstantTimeCompare([]byte(token), []byte(password)) != 1 {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// limitRequestBody 限制请求体大小，防止 OOM 攻击
+func limitRequestBody(next http.Handler, maxBytes int64) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
 		next.ServeHTTP(w, r)
 	})
 }

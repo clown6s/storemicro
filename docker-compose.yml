@@ -1,12 +1,9 @@
-version: "3.8"
-
 services:
   user:
     build:
       context: ./user
       dockerfile: Dockerfile
     ports:
-      - "9001:9001"
       - "9101:9101"
     environment:
       - DB_PASSWORD=${DB_PASSWORD}
@@ -24,7 +21,6 @@ services:
       context: ./district
       dockerfile: Dockerfile
     ports:
-      - "9003:9003"
       - "9103:9103"
     environment:
       - DB_PASSWORD=${DB_PASSWORD}

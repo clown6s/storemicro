@@ -1,5 +1,5 @@
 # Build stage
-FROM golang:1.23-alpine AS builder
+FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache git
 
@@ -18,11 +18,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/gateway ./cmd/gateway
 FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates tzdata
+RUN adduser -D -u 1000 appuser
 ENV TZ=Asia/Shanghai
 
 WORKDIR /app
 COPY --from=builder /bin/gateway .
 COPY --from=builder configs/ ./configs/
+
+USER appuser
 
 EXPOSE 8080
 

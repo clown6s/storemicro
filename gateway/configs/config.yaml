@@ -41,11 +41,11 @@ log:
   # max_age: 30      # 保留天数（默认 30）
   # compress: true   # gzip 压缩旧文件
 
-# JWT 配置（生产环境必须通过环境变量注入，不能使用默认值）
+# JWT 配置（⚠️ 生产环境必须通过环境变量 JWT_SECRET 注入，不得使用默认值）
 jwt:
   secret: "${JWT_SECRET:dev-secret-key-must-be-at-least-32-chars!!}"
 
-# Redis 配置（生产环境必须通过环境变量注入密码）
+# Redis 配置（⚠️ 生产环境必须通过环境变量 REDIS_PASSWORD 注入，不得使用默认值）
 redis:
   addr: "${REDIS_ADDR:10.211.55.5:6379}"
   password: "${REDIS_PASSWORD:admin@zzp}"

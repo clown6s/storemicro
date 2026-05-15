@@ -30,6 +30,11 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 func corsMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 	originSet := make(map[string]struct{}, len(allowOrigins))
 	for _, o := range allowOrigins {
+		o = strings.TrimSpace(o)
+		if o == "*" {
+			pkglog.L().Warn("CORS: wildcard origin '*' is not allowed with credentials, skipping")
+			continue
+		}
 		originSet[o] = struct{}{}
 	}
 
@@ -135,7 +140,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		path := r.URL.Path
 		route := routeKey(r.Method, path)
 
-		if _, allowed := noAuthRoutes[route]; allowed {
+		if isNoAuthRoute(r.Method, path) {
 			if limiter, ok := rateLimitRoutes[route]; ok {
 				ip := extractIP(r, trustedProxies)
 				if !limiter.allow(r.Context(), "storemicro:rl:"+path+":"+ip) {
@@ -159,15 +164,8 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		}
 
 		tokenStr := authHeader
-		if len(authHeader) > 6 {
-			// 支持多种 Bearer 格式（大小写不敏感）
-			prefix := strings.ToLower(authHeader[:7])
-			if prefix == "bearer " {
-				tokenStr = strings.TrimSpace(authHeader[7:])
-			} else if strings.ToLower(authHeader[:6]) == "bearer" {
-				// "Bearer" 无空格变体，视为 token 本身就是 "Bearer"
-				tokenStr = authHeader
-			}
+		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+			tokenStr = strings.TrimSpace(authHeader[7:])
 		}
 
 		token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
@@ -210,6 +208,17 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		}
 		_ = val
 
+		// 校验 Redis 中 token 对应的 userID 与 JWT claims 一致
+		redisUserID, parseErr := strconv.ParseInt(val, 10, 64)
+		if parseErr != nil || redisUserID != claims.UserID {
+			pkglog.L().Warn("jwt auth failed: token userID mismatch",
+				zap.Int64("jwt_user_id", claims.UserID),
+				zap.String("redis_value", val),
+			)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
+			return
+		}
+
 		ctx := context.WithValue(r.Context(), ContextKeyUserID, claims.UserID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
@@ -217,6 +226,17 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 
 func routeKey(method, path string) string {
 	return method + " " + path
+}
+
+// isNoAuthRoute 检查请求是否在免认证白名单中（对 path 做 URL 标准化防止编码绕过）
+func isNoAuthRoute(method, path string) bool {
+	// URL 标准化：去除多余的 / 和 .
+	cleaned := path
+	for strings.Contains(cleaned, "//") {
+		cleaned = strings.ReplaceAll(cleaned, "//", "/")
+	}
+	_, allowed := noAuthRoutes[method+" "+cleaned]
+	return allowed
 }
 
 func writeJSON(w http.ResponseWriter, code int, body string) {
