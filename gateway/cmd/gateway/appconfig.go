@@ -143,21 +143,30 @@ func DefaultAppConfig() *AppConfig {
 	}
 }
 
-// expandEnv 支持 ${VAR:default} 语法，找不到环境变量时使用默认值
-var envPattern = regexp.MustCompile(`\$\{(\w+):([^}]*)\}`)
+// expandEnv 支持 ${VAR:default} 和 ${VAR} / $VAR 语法
+// 使用单次正则匹配处理所有格式，避免 os.ExpandEnv 双重展开导致密码含 $ 时被截断
+var envPattern = regexp.MustCompile(`\$\{(\w+):([^}]*)\}|\$\{(\w+)\}|\$(\w+)`)
 
 func expandEnv(s string) string {
-	// 先处理 ${VAR:default} 格式
-	// 注意：引号由 YAML 模板控制，此处不做自动加引号，避免与已有引号冲突
-	s = envPattern.ReplaceAllStringFunc(s, func(match string) string {
+	return envPattern.ReplaceAllStringFunc(s, func(match string) string {
 		sub := envPattern.FindStringSubmatch(match)
-		if val, ok := os.LookupEnv(sub[1]); ok {
+		if sub[1] != "" {
+			// ${VAR:default}
+			if val, ok := os.LookupEnv(sub[1]); ok {
+				return val
+			}
+			return sub[2]
+		}
+		// ${VAR} 或 $VAR
+		varName := sub[3]
+		if varName == "" {
+			varName = sub[4]
+		}
+		if val, ok := os.LookupEnv(varName); ok {
 			return val
 		}
-		return sub[2]
+		return match // 环境变量不存在时保留原文
 	})
-	// 再处理标准 ${VAR} / $VAR 格式
-	return os.ExpandEnv(s)
 }
 
 // LoadAppConfig 从 YAML 文件加载应用配置

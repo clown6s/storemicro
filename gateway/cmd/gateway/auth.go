@@ -41,6 +41,7 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("Content-Security-Policy", "default-src 'self'")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), interest-cohort=()")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -62,6 +63,7 @@ func corsMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 			if origin != "" {
 				if _, ok := originSet[origin]; ok {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
+					w.Header().Set("Vary", "Origin")
 					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 					w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -155,14 +157,16 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		route := routeKey(r.Method, path)
+		// 标准化路径用于路由匹配和限流 key，防止 // 或 ./ 绕过限流
+		rawPath := r.URL.Path
+		cleaned := path.Clean(rawPath)
+		route := routeKey(r.Method, cleaned)
 
-		if isNoAuthRoute(r.Method, path) {
+		if isNoAuthRoute(r.Method, rawPath) {
 			if limiter, ok := rateLimitRoutes[route]; ok {
 				ip := extractIP(r, trustedProxies)
-				if !limiter.allow(r.Context(), "storemicro:rl:"+path+":"+ip) {
-					pkglog.L().Warn("rate limited", zap.String("path", path), zap.String("ip", ip))
+				if !limiter.allow(r.Context(), "storemicro:rl:"+cleaned+":"+ip) {
+					pkglog.L().Warn("rate limited", zap.String("path", cleaned), zap.String("ip", ip))
 					writeJSON(w, http.StatusTooManyRequests, `{"code":429,"message":"too many requests"}`)
 					return
 				}
@@ -174,7 +178,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			pkglog.L().Warn("jwt auth failed: missing Authorization header",
-				zap.String("path", path),
+				zap.String("path", cleaned),
 				zap.String("remote", r.RemoteAddr),
 			)
 			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"missing token"}`)
@@ -194,7 +198,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		})
 		if err != nil || !token.Valid {
 			pkglog.L().Warn("jwt auth failed: invalid token",
-				zap.String("path", path),
+				zap.String("path", cleaned),
 				zap.Error(err),
 			)
 			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
@@ -214,7 +218,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		if err == redis.Nil {
 			redisCancel()
 			pkglog.L().Warn("jwt auth failed: token revoked (logged in elsewhere)",
-				zap.String("path", path),
+				zap.String("path", cleaned),
 				zap.Int64("user_id", claims.UserID),
 			)
 			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
@@ -222,7 +226,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		} else if err != nil {
 			redisCancel()
 			pkglog.L().Error("redis check token failed, fail-closed",
-				zap.String("path", path),
+				zap.String("path", cleaned),
 				zap.Int64("user_id", claims.UserID),
 				zap.Error(err),
 			)

@@ -13,19 +13,31 @@ import (
 
 var _ config.Source = (*envFile)(nil)
 
-// envPattern 匹配 ${VAR:default} 语法
-var envPattern = regexp.MustCompile(`\$\{(\w+):([^}]*)\}`)
+// envPattern 匹配 ${VAR:default}、${VAR} 和 $VAR 三种语法
+// 使用单次正则匹配，避免 os.ExpandEnv 双重展开导致密码含 $ 时被截断
+var envPattern = regexp.MustCompile(`\$\{(\w+):([^}]*)\}|\$\{(\w+)\}|\$(\w+)`)
 
-// expandEnv 支持 ${VAR:default} 和标准 ${VAR} / $VAR 语法
+// expandEnv 支持 ${VAR:default}、${VAR} 和 $VAR 语法
 func expandEnv(s string) string {
-	s = envPattern.ReplaceAllStringFunc(s, func(match string) string {
+	return envPattern.ReplaceAllStringFunc(s, func(match string) string {
 		sub := envPattern.FindStringSubmatch(match)
-		if val, ok := os.LookupEnv(sub[1]); ok {
+		if sub[1] != "" {
+			// ${VAR:default} — 有默认值
+			if val, ok := os.LookupEnv(sub[1]); ok {
+				return val
+			}
+			return sub[2] // 返回默认值
+		}
+		// ${VAR} 或 $VAR — 无默认值
+		varName := sub[3]
+		if varName == "" {
+			varName = sub[4]
+		}
+		if val, ok := os.LookupEnv(varName); ok {
 			return val
 		}
-		return sub[2]
+		return match // 环境变量不存在时保留原文
 	})
-	return os.ExpandEnv(s)
 }
 
 type envFile struct {

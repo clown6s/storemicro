@@ -1,9 +1,10 @@
 package strutil
 
-// MaskPhone 脱敏手机号（138****5678）
+// MaskPhone 脱敏手机号（138****5678），使用 rune 避免多字节字符误判
 func MaskPhone(phone string) string {
-	if len(phone) != 11 {
+	runes := []rune(phone)
+	if len(runes) != 11 {
 		return "***"
 	}
-	return phone[:3] + "****" + phone[7:]
+	return string(runes[:3]) + "****" + string(runes[7:])
 }

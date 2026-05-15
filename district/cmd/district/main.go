@@ -51,6 +51,9 @@ func main() {
 		confPath = resolveConfDir()
 	}
 
+	// 自动加载 .env 文件（配置目录 → 当前目录 → 上级目录），不覆盖已有环境变量
+	loadDotenv(confPath)
+
 	// 抑制 Kratos config.Load() 内部标准库 log 的 DEBUG 输出
 	stdlog.SetOutput(io.Discard)
 
@@ -203,7 +206,8 @@ func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *htt
 		defer cancel()
 
 		if err := appData.DB().PingContext(ctx); err != nil {
-			checks["mysql"] = "unhealthy: " + err.Error()
+			helper.Warnf("readyz mysql ping failed: %v", err)
+			checks["mysql"] = "unhealthy"
 		} else {
 			checks["mysql"] = "ok"
 		}
@@ -266,4 +270,38 @@ func metricsBearerAuth(next http.Handler, password string) http.Handler {
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// loadDotenv 自动加载 .env 文件（配置目录 → 当前目录 → 上级目录），不覆盖已有环境变量
+func loadDotenv(confPath string) {
+	// 优先在配置文件所在目录找 .env
+	candidates := []string{filepath.Join(confPath, ".env"), ".env", "../.env"}
+	if confPath != "" {
+		if info, err := os.Stat(confPath); err == nil && info.IsDir() {
+			candidates[0] = filepath.Join(confPath, ".env")
+		} else {
+			candidates[0] = filepath.Join(filepath.Dir(confPath), ".env")
+		}
+	}
+	for _, p := range candidates {
+		if data, err := os.ReadFile(p); err == nil {
+			for _, line := range strings.Split(string(data), "\n") {
+				line = strings.TrimSpace(line)
+				if line == "" || strings.HasPrefix(line, "#") {
+					continue
+				}
+				key, val, ok := strings.Cut(line, "=")
+				if !ok {
+					continue
+				}
+				key = strings.TrimSpace(key)
+				val = strings.TrimSpace(val)
+				val = strings.Trim(val, `"'`)
+				if os.Getenv(key) == "" {
+					os.Setenv(key, val)
+				}
+			}
+			return
+		}
+	}
 }
