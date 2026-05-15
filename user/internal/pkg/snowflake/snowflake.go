@@ -146,7 +146,14 @@ func retryKeepAliveOnce(etcdClient *clientv3.Client, key string) bool {
 	default:
 	}
 
-	time.Sleep(5 * time.Second)
+	// 可取消等待，避免 time.Sleep 阻塞进程关闭
+	timer := time.NewTimer(5 * time.Second)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		return false
+	case <-timer.C:
+	}
 
 	select {
 	case <-ctx.Done():

@@ -264,10 +264,10 @@ func (r *userRepo) Delete(ctx context.Context, id int64) error {
 
 	affected, _ := result.RowsAffected()
 	if affected == 0 {
-		return biz.ErrUserNotFound
+		// 软删除幂等：用户可能已被删除，不再报 ErrUserNotFound（防止用户 ID 枚举）
+		zap.L().Debug("userRepo.Delete: no rows affected (already deleted)", zap.Int64("id", id))
+		return nil
 	}
-
-	zap.L().Info("userRepo.Delete success", zap.Int64("id", id))
 	return nil
 }
 

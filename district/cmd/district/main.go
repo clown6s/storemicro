@@ -120,6 +120,9 @@ func main() {
 	var etcdClient *clientv3.Client
 	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "etcd",
 		func(rCtx context.Context) error {
+			if etcdClient != nil {
+				etcdClient.Close()
+			}
 			var err error
 			etcdClient, err = clientv3.New(clientv3.Config{
 				Endpoints:   bc.Registry.Etcd.Endpoints,

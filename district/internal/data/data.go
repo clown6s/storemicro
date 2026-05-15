@@ -2,6 +2,7 @@ package data
 
 import (
 	"database/sql"
+	"errors"
 
 	"district/internal/conf"
 
@@ -24,6 +25,12 @@ func (d *Data) DB() *sql.DB { return d.db }
 
 // NewData 创建 Data 实例（使用共享的 dbutil 连接池和重试逻辑）
 func NewData(c *conf.Data) (*Data, func(), error) {
+	if c == nil || c.Database == nil {
+		return nil, nil, errors.New("data.database config is required")
+	}
+	if c.Database.Source == "" {
+		return nil, nil, errors.New("database source (DSN) is required")
+	}
 	pool := pkgdb.DefaultPool()
 	if c.Database.MaxOpenConns > 0 {
 		pool.MaxOpenConns = int(c.Database.MaxOpenConns)

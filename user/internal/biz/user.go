@@ -228,6 +228,7 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 	}
 
 	zap.L().Info("user logged in", zap.Int64("id", user.ID), zap.String("phone", pkgstr.MaskPhone(phone)))
+	user.Password = "" // 防御性清除：不在 biz 层之外传播密码 hash
 	return token, user, nil
 }
 

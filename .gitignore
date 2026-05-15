@@ -27,6 +27,10 @@ logs/
 # Environment files (may contain secrets)
 **/.env
 **/.env.*
+/.env
+/gateway/.env
+/user/.env
+/district/.env
 
 # Config files with secrets (use config.yaml.example as template)
 district/configs/config.yaml
