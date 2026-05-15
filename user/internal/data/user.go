@@ -81,11 +81,11 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 
 	if phone != "" {
 		conditions = append(conditions, "phone LIKE ?")
-		args = append(args, "%"+phone+"%")
+		args = append(args, "%"+escapeLike(phone)+"%")
 	}
 	if name != "" {
 		conditions = append(conditions, "real_name LIKE ?")
-		args = append(args, "%"+name+"%")
+		args = append(args, "%"+escapeLike(name)+"%")
 	}
 
 	where := strings.Join(conditions, " AND ")
@@ -172,7 +172,7 @@ func (r *userRepo) Update(ctx context.Context, user *biz.User) error {
 	}
 
 	args = append(args, user.ID)
-	query := fmt.Sprintf("UPDATE user SET %s WHERE id = ?", strings.Join(setClauses, ", "))
+	query := fmt.Sprintf("UPDATE user SET %s WHERE id = ? AND (deleted_at IS NULL OR deleted_at = '')", strings.Join(setClauses, ", "))
 
 	result, err := r.data.db.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -195,8 +195,9 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 	if err != nil {
 		return fmt.Errorf("begin tx failed: %w", err)
 	}
+	committed := false
 	defer func() {
-		if err != nil {
+		if !committed {
 			tx.Rollback()
 		}
 	}()
@@ -251,7 +252,7 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 	}
 
 	args = append(args, user.ID)
-	query := fmt.Sprintf("UPDATE user SET %s WHERE id = ?", strings.Join(setClauses, ", "))
+	query := fmt.Sprintf("UPDATE user SET %s WHERE id = ? AND (deleted_at IS NULL OR deleted_at = '')", strings.Join(setClauses, ", "))
 
 	result, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
@@ -266,6 +267,7 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx failed: %w", err)
 	}
+	committed = true
 
 	return nil
 }
@@ -292,14 +294,23 @@ func (r *userRepo) Delete(ctx context.Context, id int64) error {
 	return nil
 }
 
+// escapeLike 转义 SQL LIKE 通配符（% _ \）
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
+}
+
 // RegisterTx 事务注册：唯一性检查 + 创建用户原子操作，回填 user.ID
 func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 	tx, err := r.data.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin tx failed: %w", err)
 	}
+	committed := false
 	defer func() {
-		if err != nil {
+		if !committed {
 			tx.Rollback()
 		}
 	}()
@@ -348,6 +359,7 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 	if err = tx.Commit(); err != nil {
 		return fmt.Errorf("commit tx failed: %w", err)
 	}
+	committed = true
 
 	// 回填 ID
 	user.ID = id

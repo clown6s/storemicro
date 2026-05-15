@@ -72,7 +72,6 @@ func main() {
 		pkglog.L().Error("failed to create gateway proxy", zap.Error(err))
 		os.Exit(1)
 	}
-	defer proxy.Close()
 
 	// 创建 HTTP 服务器（生产级超时配置）
 	srv := &http.Server{
@@ -104,6 +103,9 @@ func main() {
 	<-quit
 
 	pkglog.L().Info("gateway shutting down...")
+
+	// 先关闭 proxy 连接（gRPC/Redis/etcd），停止接收新请求
+	proxy.Close()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

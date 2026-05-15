@@ -26,7 +26,7 @@ func NewDistrictService(uc *biz.DistrictUseCase) *DistrictService {
 }
 
 func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.GetProvinceTreeReq) (*districtv1.GetProvinceTreeResp, error) {
-	zap.L().Info("GetProvinceTree called", zap.String("adCode", req.AdCode))
+	zap.L().Debug("GetProvinceTree called", zap.String("adCode", req.AdCode))
 
 	districts, err := d.uc.Get(ctx, req.AdCode)
 	if err != nil {

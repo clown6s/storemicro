@@ -8,7 +8,6 @@ import (
 	"user/internal/conf"
 	"user/internal/pkg/redis"
 
-	"github.com/go-kratos/kratos/v2/log"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/wire"
 	pkgretry "github.com/storemicro/pkg/retry"
@@ -25,7 +24,7 @@ type Data struct {
 }
 
 // NewData 创建 Data 实例
-func NewData(c *conf.Data, r *redis.Redis, logger log.Logger) (*Data, func(), error) {
+func NewData(c *conf.Data, r *redis.Redis) (*Data, func(), error) {
 	db, err := sql.Open("mysql", c.Database.Source)
 	if err != nil {
 		return nil, nil, err
@@ -47,6 +46,7 @@ func NewData(c *conf.Data, r *redis.Redis, logger log.Logger) (*Data, func(), er
 	db.SetMaxOpenConns(int(maxOpenConns))
 	db.SetMaxIdleConns(int(maxIdleConns))
 	db.SetConnMaxLifetime(connMaxLifetime)
+	db.SetConnMaxIdleTime(connMaxLifetime / 2) // 空闲连接最大存活时间为最大生命周期的二分之一
 
 	// 带重试的 MySQL 连接验证（5 次指数退避）
 	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "mysql",

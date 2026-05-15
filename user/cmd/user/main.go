@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"time"
 
+	stdlog "log"
 	"user/internal/conf"
 	zaplog "user/internal/pkg/log"
 	"user/internal/pkg/snowflake"
@@ -44,6 +46,9 @@ func main() {
 	if confPath == "" {
 		confPath = resolveConfDir()
 	}
+
+	// 抑制 Kratos config.Load() 内部标准库 log 的 DEBUG 输出
+	stdlog.SetOutput(io.Discard)
 
 	c := config.New(
 		config.WithSource(

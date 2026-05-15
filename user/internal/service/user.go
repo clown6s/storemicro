@@ -47,7 +47,7 @@ func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*use
 
 // Register 用户注册
 func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error) {
-	zap.L().Debug("Register called", zap.String("phone", req.Phone))
+	zap.L().Debug("Register called", zap.String("phone", maskPhone(req.Phone)))
 
 	user := &biz.User{
 		Phone:    req.Phone,
@@ -62,7 +62,7 @@ func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*u
 
 	err := s.uc.Register(ctx, user)
 	if err != nil {
-		zap.L().Warn("Register failed", zap.String("phone", req.Phone), zap.Error(err))
+		zap.L().Warn("Register failed", zap.String("phone", maskPhone(req.Phone)), zap.Error(err))
 		return nil, s.mapError(err)
 	}
 
@@ -74,11 +74,11 @@ func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*u
 
 // Login 用户登录
 func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error) {
-	zap.L().Debug("Login called", zap.String("phone", req.Phone))
+	zap.L().Debug("Login called", zap.String("phone", maskPhone(req.Phone)))
 
 	token, user, err := s.uc.Login(ctx, req.Phone, req.Password)
 	if err != nil {
-		zap.L().Warn("Login failed", zap.String("phone", req.Phone), zap.Error(err))
+		zap.L().Warn("Login failed", zap.String("phone", maskPhone(req.Phone)), zap.Error(err))
 		return nil, s.mapError(err)
 	}
 
@@ -136,6 +136,14 @@ func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (
 }
 
 // ---- 辅助方法 ----
+
+// maskPhone 脱敏手机号（138****5678）
+func maskPhone(phone string) string {
+	if len(phone) != 11 {
+		return "***"
+	}
+	return phone[:3] + "****" + phone[7:]
+}
 
 // toUserInfo 将 biz.User 转换为 proto UserInfo（不含密码）
 func (s *UserService) toUserInfo(u *biz.User) *userv1.UserInfo {

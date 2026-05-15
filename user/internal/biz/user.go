@@ -169,7 +169,7 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 		return err
 	}
 
-	zap.L().Info("user registered", zap.Int64("id", user.ID), zap.String("phone", user.Phone))
+	zap.L().Info("user registered", zap.Int64("id", user.ID), zap.String("phone", maskPhone(user.Phone)))
 	return nil
 }
 
@@ -185,10 +185,14 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 	// 查找用户
 	user, err := uc.repo.GetByPhone(ctx, phone)
 	if err != nil {
-		zap.L().Warn("login failed: user not found", zap.String("phone", phone), zap.Error(err))
-		// [C3] timing-safe: 即使用户不存在，也对 dummy hash 做 bcrypt 比较，防止通过响应时间差异枚举手机号
-		_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
-		return "", nil, ErrWrongCredentials
+		if errors.Is(err, ErrUserNotFound) {
+			// [C3] timing-safe: 用户不存在时对 dummy hash 做 bcrypt 比较，防止通过响应时间差异枚举手机号
+			_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
+			return "", nil, ErrWrongCredentials
+		}
+		// 数据库错误，直接返回，不做 dummy 比较（避免在 DB 故障时也产生 bcrypt 延迟）
+		zap.L().Error("login failed: db error", zap.String("phone", phone), zap.Error(err))
+		return "", nil, err
 	}
 
 	// 验证密码
@@ -211,8 +215,16 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 		return "", nil, ErrStoreToken
 	}
 
-	zap.L().Info("user logged in", zap.Int64("id", user.ID), zap.String("phone", phone))
+	zap.L().Info("user logged in", zap.Int64("id", user.ID), zap.String("phone", maskPhone(phone)))
 	return token, user, nil
+}
+
+// maskPhone 脱敏手机号（138****5678）
+func maskPhone(phone string) string {
+	if len(phone) != 11 {
+		return "***"
+	}
+	return phone[:3] + "****" + phone[7:]
 }
 
 // Logout 用户登出（根据 token 删除 Redis 中的 token 双映射）

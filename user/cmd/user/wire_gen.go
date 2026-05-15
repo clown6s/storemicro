@@ -28,7 +28,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, confJwt *conf.Jwt, co
 	}
 
 	// Data（数据库 + Redis）
-	dataData, cleanup, err := data.NewData(confData, r, logger)
+	dataData, cleanup, err := data.NewData(confData, r)
 	if err != nil {
 		r.Close()
 		return nil, nil, err

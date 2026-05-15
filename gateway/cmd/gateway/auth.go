@@ -160,8 +160,15 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		}
 
 		tokenStr := authHeader
-		if len(authHeader) > 7 && strings.EqualFold(authHeader[:7], "Bearer ") {
-			tokenStr = strings.TrimSpace(authHeader[7:])
+		if len(authHeader) > 6 {
+			// 支持多种 Bearer 格式（大小写不敏感）
+			prefix := strings.ToLower(authHeader[:7])
+			if prefix == "bearer " {
+				tokenStr = strings.TrimSpace(authHeader[7:])
+			} else if strings.ToLower(authHeader[:6]) == "bearer" {
+				// "Bearer" 无空格变体，视为 token 本身就是 "Bearer"
+				tokenStr = authHeader
+			}
 		}
 
 		token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
