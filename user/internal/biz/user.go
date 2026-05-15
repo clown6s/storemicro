@@ -3,12 +3,14 @@ package biz
 import (
 	"context"
 	"errors"
+	"log"
 	"regexp"
 
 	"user/internal/pkg/jwt"
 	"user/internal/pkg/redis"
 
 	"github.com/google/wire"
+	pkgstr "github.com/storemicro/pkg/strutil"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -62,7 +64,11 @@ var (
 var dummyHash []byte
 
 func init() {
-	dummyHash, _ = bcrypt.GenerateFromPassword([]byte("dummy-timing-safe-hash"), bcrypt.DefaultCost)
+	var err error
+	dummyHash, err = bcrypt.GenerateFromPassword([]byte("dummy-timing-safe-hash"), bcrypt.DefaultCost)
+	if err != nil {
+		log.Fatalf("failed to generate dummy bcrypt hash: %v", err)
+	}
 }
 
 // User 领域模型（对应数据库 user 表全部字段）
@@ -169,7 +175,7 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 		return err
 	}
 
-	zap.L().Info("user registered", zap.Int64("id", user.ID), zap.String("phone", maskPhone(user.Phone)))
+	zap.L().Info("user registered", zap.Int64("id", user.ID), zap.String("phone", pkgstr.MaskPhone(user.Phone)))
 	return nil
 }
 
@@ -191,13 +197,13 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 			return "", nil, ErrWrongCredentials
 		}
 		// 数据库错误，直接返回，不做 dummy 比较（避免在 DB 故障时也产生 bcrypt 延迟）
-		zap.L().Error("login failed: db error", zap.String("phone", phone), zap.Error(err))
+		zap.L().Error("login failed: db error", zap.String("phone", pkgstr.MaskPhone(phone)), zap.Error(err))
 		return "", nil, err
 	}
 
 	// 验证密码
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
-		zap.L().Warn("login failed: password incorrect", zap.String("phone", phone))
+		zap.L().Warn("login failed: password incorrect", zap.String("phone", pkgstr.MaskPhone(phone)))
 		return "", nil, ErrWrongCredentials
 	}
 
@@ -215,16 +221,8 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 		return "", nil, ErrStoreToken
 	}
 
-	zap.L().Info("user logged in", zap.Int64("id", user.ID), zap.String("phone", maskPhone(phone)))
+	zap.L().Info("user logged in", zap.Int64("id", user.ID), zap.String("phone", pkgstr.MaskPhone(phone)))
 	return token, user, nil
-}
-
-// maskPhone 脱敏手机号（138****5678）
-func maskPhone(phone string) string {
-	if len(phone) != 11 {
-		return "***"
-	}
-	return phone[:3] + "****" + phone[7:]
 }
 
 // Logout 用户登出（根据 token 删除 Redis 中的 token 双映射）
@@ -270,6 +268,12 @@ func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32, phon
 	}
 	if pageSize > 100 {
 		pageSize = 100
+	}
+	if len(phone) > 11 {
+		return nil, 0, ErrInvalidPhone
+	}
+	if len(name) > 50 {
+		return nil, 0, ErrNameTooLong
 	}
 
 	users, total, err := uc.repo.List(ctx, page, pageSize, phone, name)

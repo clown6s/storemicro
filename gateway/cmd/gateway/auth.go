@@ -69,7 +69,6 @@ const (
 var noAuthRoutes = map[string]struct{}{
 	"POST /api/v1/user/register": {},
 	"POST /api/v1/user/login":    {},
-	"POST /api/v1/user/ping":     {},
 	"GET /healthz":               {},
 }
 
@@ -172,7 +171,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		}
 
 		token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
-			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			if token.Method != jwt.SigningMethodHS256 {
 				return nil, jwt.ErrSignatureInvalid
 			}
 			return []byte(secret), nil

@@ -6,6 +6,7 @@ use (
 	./pkg/dbutil
 	./pkg/envexpand
 	./pkg/retry
+	./pkg/strutil
 	./pkg/tracing
 	./pkg/zaplogger
 	./user

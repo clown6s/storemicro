@@ -20,18 +20,18 @@ import (
 	"github.com/go-kratos/kratos/v2/registry"
 )
 
-func wireApp(confServer *conf.Server, confData *conf.Data, confJwt *conf.Jwt, confRedis *conf.Redis, logger log.Logger, reg registry.Registrar) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, confJwt *conf.Jwt, confRedis *conf.Redis, logger log.Logger, reg registry.Registrar) (*kratos.App, *data.Data, func(), error) {
 	// Redis
 	r, err := redis.NewRedis(confRedis.Addr, confRedis.Password, int(confRedis.Db))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Data（数据库 + Redis）
 	dataData, cleanup, err := data.NewData(confData, r)
 	if err != nil {
 		r.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// JWT
@@ -44,7 +44,7 @@ func wireApp(confServer *conf.Server, confData *conf.Data, confJwt *conf.Jwt, co
 	grpcServer := server.NewGRPCServer(confServer, logger, userService)
 	app := newApp(logger, grpcServer, reg)
 
-	return app, func() {
+	return app, dataData, func() {
 		cleanup()
 	}, nil
 }

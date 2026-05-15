@@ -11,6 +11,7 @@ import (
 	"user/internal/biz"
 	"user/internal/pkg/snowflake"
 
+	pkgstr "github.com/storemicro/pkg/strutil"
 	"go.uber.org/zap"
 )
 
@@ -46,7 +47,7 @@ func (r *userRepo) Get(ctx context.Context, id int64) (*biz.User, error) {
 }
 
 func (r *userRepo) GetByPhone(ctx context.Context, phone string) (*biz.User, error) {
-	zap.L().Debug("userRepo.GetByPhone", zap.String("phone", phone))
+	zap.L().Debug("userRepo.GetByPhone", zap.String("phone", pkgstr.MaskPhone(phone)))
 
 	row := r.data.db.QueryRowContext(ctx,
 		`SELECT id, password, COALESCE(real_name,''), COALESCE(avatar,''), gender, COALESCE(age,0),
@@ -58,10 +59,10 @@ func (r *userRepo) GetByPhone(ctx context.Context, phone string) (*biz.User, err
 		&user.Phone, &user.Email, &user.CreateTime, &user.UpdateTime, &user.Remark, &user.DeletedAt)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			zap.L().Warn("userRepo.GetByPhone not found", zap.String("phone", phone))
+			zap.L().Warn("userRepo.GetByPhone not found", zap.String("phone", pkgstr.MaskPhone(phone)))
 			return nil, biz.ErrUserNotFound
 		}
-		zap.L().Error("userRepo.GetByPhone failed", zap.String("phone", phone), zap.Error(err))
+		zap.L().Error("userRepo.GetByPhone failed", zap.String("phone", pkgstr.MaskPhone(phone)), zap.Error(err))
 		return nil, fmt.Errorf("query user by phone failed: %w", err)
 	}
 	return user, nil
@@ -70,7 +71,7 @@ func (r *userRepo) GetByPhone(ctx context.Context, phone string) (*biz.User, err
 func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name string) ([]*biz.User, int64, error) {
 	zap.L().Debug("userRepo.List",
 		zap.Int32("page", page), zap.Int32("pageSize", pageSize),
-		zap.String("phone", phone), zap.String("name", name),
+		zap.String("phone", pkgstr.MaskPhone(phone)), zap.String("name", name),
 	)
 
 	// 动态拼接 WHERE 条件

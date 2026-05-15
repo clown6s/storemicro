@@ -12,15 +12,16 @@ import (
 
 // AppConfig 应用配置（从 config.yaml 读取）
 type AppConfig struct {
-	Name       string           `yaml:"name"`
-	Version    string           `yaml:"version"`
-	Server     ServerConfig     `yaml:"server"`
-	GrpcClient GrpcClientConfig `yaml:"grpc_client"`
-	Etcd       EtcdConfig       `yaml:"etcd"`
-	Jwt        JwtConfig        `yaml:"jwt"`
-	Redis      RedisConfig      `yaml:"redis"`
-	Log        LogConfig        `yaml:"log"`
-	Tracing    TracingConfig    `yaml:"tracing"`
+	Name            string           `yaml:"name"`
+	Version         string           `yaml:"version"`
+	Server          ServerConfig     `yaml:"server"`
+	GrpcClient      GrpcClientConfig `yaml:"grpc_client"`
+	Etcd            EtcdConfig       `yaml:"etcd"`
+	Jwt             JwtConfig        `yaml:"jwt"`
+	Redis           RedisConfig      `yaml:"redis"`
+	Log             LogConfig        `yaml:"log"`
+	Tracing         TracingConfig    `yaml:"tracing"`
+	MetricsPassword string           `yaml:"metrics_password"`
 }
 
 // GrpcClientConfig gRPC 出站客户端配置

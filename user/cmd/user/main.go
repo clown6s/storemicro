@@ -13,6 +13,7 @@ import (
 
 	stdlog "log"
 	"user/internal/conf"
+	"user/internal/data"
 	zaplog "user/internal/pkg/log"
 	"user/internal/pkg/snowflake"
 
@@ -133,7 +134,7 @@ func main() {
 	}
 	helper.Infow("msg", "snowflake initialized", "node_id", snowflake.NodeID)
 
-	app, cleanup, err := wireApp(bc.Server, bc.Data, bc.Jwt, bc.Redis, zapLogger, reg)
+	app, appData, cleanup, err := wireApp(bc.Server, bc.Data, bc.Jwt, bc.Redis, zapLogger, reg)
 	if err != nil {
 		helper.Errorf("failed to wire app: %v", err)
 		os.Exit(1)
@@ -143,7 +144,7 @@ func main() {
 	helper.Infow("msg", "service started", "name", Name)
 
 	// 健康检查 HTTP sidecar（:9101），供 K8s liveness/readiness probe
-	healthSrv := startHealthServer(":9101", helper)
+	healthSrv := startHealthServer(":9101", helper, appData)
 
 	// 启动服务（阻塞，内部监听信号并优雅退出）
 	if err := app.Run(); err != nil {
@@ -187,11 +188,53 @@ func newApp(logger log.Logger, gs *grpc.Server, reg registry.Registrar) *kratos.
 }
 
 // startHealthServer 启动轻量级健康检查 HTTP 服务器（含 Prometheus metrics），返回 server 引用供优雅关闭
-func startHealthServer(addr string, helper *log.Helper) *http.Server {
+func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *http.Server {
 	mux := http.NewServeMux()
+	// liveness — 仅检查进程存活
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		b, _ := json.Marshal(map[string]string{"status": "ok", "service": Name})
+		_, _ = w.Write(b)
+	})
+	// readiness — 检查 MySQL 和 Redis 连通性
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		checks := map[string]string{}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+
+		// MySQL
+		if err := appData.DB().PingContext(ctx); err != nil {
+			checks["mysql"] = "unhealthy: " + err.Error()
+		} else {
+			checks["mysql"] = "ok"
+		}
+
+		// Redis
+		if appData.Redis() != nil {
+			if err := appData.Redis().Ping(ctx); err != nil {
+				checks["redis"] = "unhealthy: " + err.Error()
+			} else {
+				checks["redis"] = "ok"
+			}
+		}
+
+		allOk := true
+		for _, v := range checks {
+			if v != "ok" {
+				allOk = false
+				break
+			}
+		}
+		status := "ok"
+		code := http.StatusOK
+		if !allOk {
+			status = "not ready"
+			code = http.StatusServiceUnavailable
+		}
+		b, _ := json.Marshal(map[string]any{"status": status, "checks": checks})
+		w.WriteHeader(code)
 		_, _ = w.Write(b)
 	})
 	mux.Handle("/metrics", promhttp.Handler())

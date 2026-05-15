@@ -100,6 +100,11 @@ func (r *Redis) DeleteToken(ctx context.Context, token string, userID int64) err
 	return err
 }
 
+// Ping 检查 Redis 连接（供健康检查使用）
+func (r *Redis) Ping(ctx context.Context) error {
+	return r.client.Ping(ctx).Err()
+}
+
 // Close 关闭 Redis 连接
 func (r *Redis) Close() error {
 	return r.client.Close()

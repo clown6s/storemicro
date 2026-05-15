@@ -9,7 +9,7 @@
 #   POST   /api/v1/user/logout    → User/Logout
 #   GET    /api/v1/user/{id}      → User/GetUser
 #   GET    /api/v1/user/list      → User/ListUsers
-#   GET    /api/v1/district/province-tree → District/GetProvinceTree
+#   GET    /api/v1/district/provinceTree → District/GetProvinceTree
 
 name: storemicro
 version: v1
@@ -55,6 +55,9 @@ redis:
 tracing:
   endpoint: "${TRACING_ENDPOINT:10.211.55.5:4317}"
   sample_rate: 0.1
+
+# Prometheus metrics 认证密码（为空则不启用认证，生产环境建议设置）
+metrics_password: "${METRICS_PASSWORD:}"
 
 # gRPC 出站客户端配置
 grpc_client:

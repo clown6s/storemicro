@@ -119,6 +119,9 @@ func format(name string) string {
 	case ".toml":
 		return "toml"
 	default:
+		if ext == "" {
+			return ""
+		}
 		return ext[1:]
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"user/internal/biz"
 
 	"github.com/google/wire"
+	pkgstr "github.com/storemicro/pkg/strutil"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -47,7 +48,7 @@ func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*use
 
 // Register 用户注册
 func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error) {
-	zap.L().Debug("Register called", zap.String("phone", maskPhone(req.Phone)))
+	zap.L().Debug("Register called", zap.String("phone", pkgstr.MaskPhone(req.Phone)))
 
 	user := &biz.User{
 		Phone:    req.Phone,
@@ -62,7 +63,7 @@ func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*u
 
 	err := s.uc.Register(ctx, user)
 	if err != nil {
-		zap.L().Warn("Register failed", zap.String("phone", maskPhone(req.Phone)), zap.Error(err))
+		zap.L().Warn("Register failed", zap.String("phone", pkgstr.MaskPhone(req.Phone)), zap.Error(err))
 		return nil, s.mapError(err)
 	}
 
@@ -74,11 +75,11 @@ func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*u
 
 // Login 用户登录
 func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error) {
-	zap.L().Debug("Login called", zap.String("phone", maskPhone(req.Phone)))
+	zap.L().Debug("Login called", zap.String("phone", pkgstr.MaskPhone(req.Phone)))
 
 	token, user, err := s.uc.Login(ctx, req.Phone, req.Password)
 	if err != nil {
-		zap.L().Warn("Login failed", zap.String("phone", maskPhone(req.Phone)), zap.Error(err))
+		zap.L().Warn("Login failed", zap.String("phone", pkgstr.MaskPhone(req.Phone)), zap.Error(err))
 		return nil, s.mapError(err)
 	}
 
@@ -110,7 +111,7 @@ func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (
 	zap.L().Debug("ListUsers called",
 		zap.Int32("page", req.Page),
 		zap.Int32("pageSize", req.PageSize),
-		zap.String("phone", req.Phone),
+		zap.String("phone", pkgstr.MaskPhone(req.Phone)),
 		zap.String("name", req.Name),
 	)
 
@@ -136,14 +137,6 @@ func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (
 }
 
 // ---- 辅助方法 ----
-
-// maskPhone 脱敏手机号（138****5678）
-func maskPhone(phone string) string {
-	if len(phone) != 11 {
-		return "***"
-	}
-	return phone[:3] + "****" + phone[7:]
-}
 
 // toUserInfo 将 biz.User 转换为 proto UserInfo（不含密码）
 func (s *UserService) toUserInfo(u *biz.User) *userv1.UserInfo {
@@ -185,7 +178,9 @@ func (s *UserService) mapError(err error) error {
 		errors.Is(err, biz.ErrPasswordNoDigit),
 		errors.Is(err, biz.ErrNameTooLong),
 		errors.Is(err, biz.ErrRemarkTooLong),
-		errors.Is(err, biz.ErrAvatarTooLong):
+		errors.Is(err, biz.ErrAvatarTooLong),
+		errors.Is(err, biz.ErrInvalidGender),
+		errors.Is(err, biz.ErrInvalidAge):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:
 		zap.L().Error("unexpected user error", zap.Error(err))

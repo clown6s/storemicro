@@ -19,6 +19,9 @@ type Data struct {
 	db *sql.DB
 }
 
+// DB 返回底层数据库连接（供健康检查使用）
+func (d *Data) DB() *sql.DB { return d.db }
+
 // NewData 创建 Data 实例（使用共享的 dbutil 连接池和重试逻辑）
 func NewData(c *conf.Data) (*Data, func(), error) {
 	pool := pkgdb.DefaultPool()

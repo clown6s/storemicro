@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"district/internal/conf"
+	"district/internal/data"
 	zaplog "district/internal/pkg/log"
 	stdlog "log"
 
@@ -127,7 +128,7 @@ func main() {
 	reg := etcd2.New(etcdClient)
 	helper.Infow("msg", "etcd registry connected", "endpoints", bc.Registry.Etcd.Endpoints)
 
-	app, cleanup, err := wireApp(bc.Server, bc.Data, zapLogger, reg)
+	app, appData, cleanup, err := wireApp(bc.Server, bc.Data, zapLogger, reg)
 	if err != nil {
 		helper.Errorf("failed to wire app: %v", err)
 		os.Exit(1)
@@ -137,7 +138,7 @@ func main() {
 	helper.Infow("msg", "service started", "name", Name)
 
 	// 健康检查 HTTP sidecar（:9103）
-	healthSrv := startHealthServer(":9103", helper)
+	healthSrv := startHealthServer(":9103", helper, appData)
 
 	// 启动服务（阻塞，内部监听信号并优雅退出）
 	if err := app.Run(); err != nil {
@@ -181,11 +182,43 @@ func newApp(logger log.Logger, gs *grpc.Server, reg registry.Registrar) *kratos.
 }
 
 // startHealthServer 启动轻量级健康检查 HTTP 服务器（含 Prometheus metrics）
-func startHealthServer(addr string, helper *log.Helper) *http.Server {
+func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *http.Server {
 	mux := http.NewServeMux()
+	// liveness — 仅检查进程存活
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		b, _ := json.Marshal(map[string]string{"status": "ok", "service": Name})
+		_, _ = w.Write(b)
+	})
+	// readiness — 检查 MySQL 连通性
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		checks := map[string]string{}
+
+		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+
+		if err := appData.DB().PingContext(ctx); err != nil {
+			checks["mysql"] = "unhealthy: " + err.Error()
+		} else {
+			checks["mysql"] = "ok"
+		}
+
+		allOk := true
+		for _, v := range checks {
+			if v != "ok" {
+				allOk = false
+				break
+			}
+		}
+		status := "ok"
+		code := http.StatusOK
+		if !allOk {
+			status = "not ready"
+			code = http.StatusServiceUnavailable
+		}
+		b, _ := json.Marshal(map[string]any{"status": status, "checks": checks})
+		w.WriteHeader(code)
 		_, _ = w.Write(b)
 	})
 	mux.Handle("/metrics", promhttp.Handler())

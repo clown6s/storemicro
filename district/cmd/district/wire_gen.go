@@ -19,17 +19,17 @@ import (
 
 // Injectors from wire.go:
 
-func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, registrar registry.Registrar) (*kratos.App, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, registrar registry.Registrar) (*kratos.App, *data.Data, func(), error) {
 	dataData, cleanup, err := data.NewData(confData)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	districtRepo := data.NewDistrictRepo(dataData)
 	districtUseCase := biz.NewDistrictUseCase(districtRepo)
 	districtService := service.NewDistrictService(districtUseCase)
 	grpcServer := server.NewGRPCServer(confServer, logger, districtService)
 	app := newApp(logger, grpcServer, registrar)
-	return app, func() {
+	return app, dataData, func() {
 		cleanup()
 	}, nil
 }

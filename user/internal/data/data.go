@@ -23,6 +23,12 @@ type Data struct {
 	redis *redis.Redis
 }
 
+// DB 返回底层数据库连接（供健康检查使用）
+func (d *Data) DB() *sql.DB { return d.db }
+
+// Redis 返回底层 Redis 客户端（供健康检查使用）
+func (d *Data) Redis() *redis.Redis { return d.redis }
+
 // NewData 创建 Data 实例
 func NewData(c *conf.Data, r *redis.Redis) (*Data, func(), error) {
 	db, err := sql.Open("mysql", c.Database.Source)
@@ -54,6 +60,7 @@ func NewData(c *conf.Data, r *redis.Redis) (*Data, func(), error) {
 			return db.PingContext(rCtx)
 		},
 	); err != nil {
+		_ = db.Close()
 		return nil, nil, err
 	}
 

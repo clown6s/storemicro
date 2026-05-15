@@ -76,7 +76,7 @@ func main() {
 	// 创建 HTTP 服务器（生产级超时配置）
 	srv := &http.Server{
 		Addr:         appCfg.Server.Addr,
-		Handler:      newRootMux(proxy),
+		Handler:      newRootMux(proxy, appCfg.MetricsPassword),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,
@@ -117,19 +117,70 @@ func main() {
 	pkglog.L().Info("gateway stopped")
 }
 
-// newRootMux 构建根路由：/healthz 健康检查 + /metrics + 其余全部交给 proxy
-func newRootMux(proxy *GatewayProxy) http.Handler {
+// newRootMux 构建根路由：/healthz 健康检查 + /readyz 就绪检查 + /metrics + 其余全部交给 proxy
+func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 	mux := http.NewServeMux()
 
-	// 健康检查端点（Kubernetes liveness/readiness probe）
+	// 健康检查端点（Kubernetes liveness probe — 仅检查进程存活）
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		b, _ := json.Marshal(map[string]string{"status": "ok"})
 		_, _ = w.Write(b)
 	})
 
-	// Prometheus metrics 端点
-	mux.Handle("/metrics", promhttp.Handler())
+	// 就绪检查端点（Kubernetes readiness probe — 检查关键依赖）
+	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		checks := map[string]string{}
+
+		// Redis
+		if err := proxy.rdb.Ping(r.Context()).Err(); err != nil {
+			checks["redis"] = "unhealthy: " + err.Error()
+		} else {
+			checks["redis"] = "ok"
+		}
+
+		// etcd — 用短超时的 KV Get 验证连通性
+		etcdTimeout, cancel := context.WithTimeout(r.Context(), 3*time.Second)
+		defer cancel()
+		_, etcdErr := proxy.etcdClient.Get(etcdTimeout, "health-check-nonexistent-key")
+		if etcdErr != nil {
+			// 过滤掉正常的 "key not found" 错误（说明连接成功）
+			if !strings.Contains(etcdErr.Error(), "key not found") {
+				checks["etcd"] = "unhealthy: " + etcdErr.Error()
+			} else {
+				checks["etcd"] = "ok"
+			}
+		} else {
+			checks["etcd"] = "ok"
+		}
+
+		allOk := true
+		for _, v := range checks {
+			if v != "ok" {
+				allOk = false
+				break
+			}
+		}
+
+		status := "ok"
+		code := http.StatusOK
+		if !allOk {
+			status = "not ready"
+			code = http.StatusServiceUnavailable
+		}
+
+		b, _ := json.Marshal(map[string]any{"status": status, "checks": checks})
+		w.WriteHeader(code)
+		_, _ = w.Write(b)
+	})
+
+	// Prometheus metrics 端点（需要 metrics 密钥认证，防止暴露内部指标）
+	if metricsPassword != "" {
+		mux.Handle("/metrics", basicAuth(promhttp.Handler(), metricsPassword))
+	} else {
+		mux.Handle("/metrics", promhttp.Handler())
+	}
 
 	// 其余所有请求走 gateway proxy
 	mux.Handle("/", proxy)
@@ -159,4 +210,19 @@ func loadDotenv() {
 			return
 		}
 	}
+}
+
+// basicAuth 包装 handler，要求 Authorization header 中带 "Bearer {password}" 才放行
+func basicAuth(next http.Handler, password string) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		token := strings.TrimPrefix(auth, "Bearer ")
+		if token != password {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }

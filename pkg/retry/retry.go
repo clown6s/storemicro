@@ -69,10 +69,12 @@ func Do(ctx context.Context, cfg Config, name string, fn func(ctx context.Contex
 			zap.Error(lastErr),
 		)
 
+		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return fmt.Errorf("%s: context cancelled during retry: %w", name, ctx.Err())
-		case <-time.After(backoff):
+		case <-timer.C:
 		}
 
 		// [L5] 指数退避 + 随机抖动（防止惊群效应）
