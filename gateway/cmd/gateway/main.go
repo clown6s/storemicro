@@ -2,33 +2,56 @@ package main
 
 import (
 	"context"
-	"crypto/subtle"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	pkgcmd "github.com/storemicro/pkg/cmdutil"
 	pkgtracing "github.com/storemicro/pkg/tracing"
 	pkglog "github.com/storemicro/pkg/zaplogger"
 	"go.uber.org/zap"
+
+	"gateway/internal/appconfig"
+	gwproxy "gateway/internal/proxy"
+
+	districtv1 "gateway/api/district/v1"
+	userv1 "gateway/api/user/v1"
 )
+
+// services 服务注册表 —— 新增服务只需在此添加一行即可
+var services = []gwproxy.ServiceRegistration{
+	{
+		Name:            "user",
+		RegisterHandler: userv1.RegisterUserHandler,
+	},
+	{
+		Name:            "district",
+		RegisterHandler: districtv1.RegisterDistrictHandler,
+	},
+}
+
+// 命令行参数（只保留配置文件路径）
+var configFile string
+
+func init() {
+	flag.StringVar(&configFile, "conf", "configs/config.yaml", "config file path")
+}
 
 func main() {
 	flag.Parse()
 
 	// 自动加载 .env 文件（配置文件目录 → 当前目录 → 上级目录）
-	loadDotenv(configFile)
+	pkgcmd.LoadDotenv(configFile)
 
 	// 加载配置文件
-	appCfg, err := LoadAppConfig(configFile)
+	appCfg, err := appconfig.Load(configFile)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "failed to load config %s: %v\n", configFile, err)
 		os.Exit(1)
@@ -71,7 +94,7 @@ func main() {
 	}()
 
 	// 创建 grpc-gateway 代理
-	proxy, err := NewGatewayProxy(appCfg)
+	proxy, err := gwproxy.New(appCfg, services)
 	if err != nil {
 		pkglog.L().Error("failed to create gateway proxy", zap.Error(err))
 		os.Exit(1)
@@ -109,7 +132,6 @@ func main() {
 
 	pkglog.L().Info("gateway shutting down...")
 
-	// 先优雅关闭 HTTP 服务器（等待在途请求完成），再关闭后端连接
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -117,14 +139,13 @@ func main() {
 		pkglog.L().Error("gateway forced shutdown", zap.Error(err))
 	}
 
-	// 所有在途请求完成后，关闭后端连接
 	proxy.Close()
 
 	pkglog.L().Info("gateway stopped")
 }
 
 // newRootMux 构建根路由：/healthz 健康检查 + /readyz 就绪检查 + /metrics + 其余全部交给 proxy
-func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
+func newRootMux(proxy *gwproxy.Proxy, metricsPassword string) http.Handler {
 	mux := http.NewServeMux()
 
 	// 健康检查端点（Kubernetes liveness probe — 仅检查进程存活）
@@ -146,7 +167,7 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 
 		// Redis（显式 3s 超时）
 		redisCtx, redisCancel := context.WithTimeout(r.Context(), 3*time.Second)
-		if err := proxy.rdb.Ping(redisCtx).Err(); err != nil {
+		if err := proxy.Rdb().Ping(redisCtx).Err(); err != nil {
 			redisCancel()
 			pkglog.L().Warn("readyz: redis unhealthy", zap.Error(err))
 			checks["redis"] = "unhealthy"
@@ -155,10 +176,10 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 			checks["redis"] = "ok"
 		}
 
-		// etcd — 用短超时的 KV Get 验证连通性（key 不存在时 Get 返回 nil error，无需特殊处理）
+		// etcd — 用短超时的 KV Get 验证连通性
 		etcdTimeout, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
-		if _, etcdErr := proxy.etcdClient.Get(etcdTimeout, "health-check-nonexistent-key"); etcdErr != nil {
+		if _, etcdErr := proxy.EtcdClient().Get(etcdTimeout, "health-check-nonexistent-key"); etcdErr != nil {
 			pkglog.L().Warn("readyz: etcd unhealthy", zap.Error(etcdErr))
 			checks["etcd"] = "unhealthy"
 		} else {
@@ -190,8 +211,7 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 		_, _ = w.Write(b)
 	})
 
-	// Prometheus metrics 端点（需要 metrics 密钥认证，防止暴露内部指标）
-	// R4-SEC-05: metrics 端点必须有密码保护，空密码拒绝访问
+	// Prometheus metrics 端点
 	if metricsPassword == "" {
 		pkglog.L().Warn("metrics: no password configured, metrics endpoint is disabled")
 		mux.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -200,78 +220,13 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 			_, _ = w.Write([]byte(`{"code":401,"message":"metrics password not configured"}`))
 		}))
 	} else {
-		mux.Handle("/metrics", metricsAuth(promhttp.Handler(), metricsPassword))
+		mux.Handle("/metrics", pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword))
 	}
 
 	// 其余所有请求走 gateway proxy
 	mux.Handle("/", proxy)
 
 	return mux
-}
-
-// unquoteValue 剥离配对的引号（"value" 或 'value'），不配对时返回原值
-// 注意：strings.Trim 按字符集剥离，"he'llo 会被错误剥掉两端的 " 和 '
-func unquoteValue(s string) string {
-	if len(s) >= 2 {
-		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
-			return s[1 : len(s)-1]
-		}
-	}
-	return s
-}
-
-// loadDotenv 自动加载 .env 文件（配置文件目录 → 当前目录 → 上级目录），不覆盖已有环境变量
-func loadDotenv(configFile string) {
-	candidates := []string{filepath.Join(configFile, ".env"), ".env", "../.env"}
-	if configFile != "" {
-		if info, err := os.Stat(configFile); err == nil && info.IsDir() {
-			candidates[0] = filepath.Join(configFile, ".env")
-		} else {
-			candidates[0] = filepath.Join(filepath.Dir(configFile), ".env")
-		}
-	}
-	for _, p := range candidates {
-		if data, err := os.ReadFile(p); err == nil {
-			for _, line := range strings.Split(string(data), "\n") {
-				line = strings.TrimSpace(line)
-				if line == "" || strings.HasPrefix(line, "#") {
-					continue
-				}
-				key, val, ok := strings.Cut(line, "=")
-				if !ok {
-					continue
-				}
-				key = strings.TrimSpace(key)
-				val = strings.TrimSpace(val)
-				val = unquoteValue(val)
-				if os.Getenv(key) == "" {
-					os.Setenv(key, val)
-				}
-			}
-			return
-		}
-	}
-}
-
-// metricsAuth 包装 handler，要求 Authorization header 中带 "Bearer {password}" 才放行（timing-safe 比较）
-func metricsAuth(next http.Handler, password string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		auth := r.Header.Get("Authorization")
-		if !strings.HasPrefix(auth, "Bearer ") {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
-			return
-		}
-		token := strings.TrimPrefix(auth, "Bearer ")
-		if subtle.ConstantTimeCompare([]byte(token), []byte(password)) != 1 {
-			w.Header().Set("Content-Type", "application/json; charset=utf-8")
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write([]byte(`{"code":401,"message":"unauthorized"}`))
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
 }
 
 // limitRequestBody 限制请求体大小，防止 OOM 攻击

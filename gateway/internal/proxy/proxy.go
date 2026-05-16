@@ -1,4 +1,4 @@
-package main
+package proxy
 
 import (
 	"context"
@@ -20,34 +20,36 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	_ "google.golang.org/grpc/health"
 	"google.golang.org/grpc/keepalive"
+
+	"gateway/internal/appconfig"
+	"gateway/internal/auth"
+	"gateway/internal/circuitbreaker"
 )
 
 // ServiceRegistration 描述一个后端 gRPC 服务的注册信息
 type ServiceRegistration struct {
-	// Name 服务名，用于 etcd 服务发现（如 "user"、"district"）
-	Name string
-	// RegisterHandler 将 gRPC 连接注册到 grpc-gateway mux 的函数
+	Name            string
 	RegisterHandler func(ctx context.Context, mux *runtime.ServeMux, conn *grpc.ClientConn) error
 }
 
-// GatewayProxy 封装 grpc-gateway mux 和 gRPC 连接
-type GatewayProxy struct {
-	mux            *runtime.ServeMux
-	conns          []*grpc.ClientConn
-	etcdClient     *clientv3.Client
-	rdb            *redis.Client
-	jwtSecret      string
-	allowOrigins   []string
-	trustedProxies []string
-	otelHandler    http.Handler
+// Proxy 封装 grpc-gateway mux 和 gRPC 连接
+type Proxy struct {
+	mux         *runtime.ServeMux
+	conns       []*grpc.ClientConn
+	etcdClient  *clientv3.Client
+	rdb         *redis.Client
+	jwtSecret   string
+	origins     []string
+	proxies     []string
+	otelHandler http.Handler
 }
 
-// NewGatewayProxy 创建 grpc-gateway 代理
-func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
-	proxy := &GatewayProxy{
-		jwtSecret:      cfg.Jwt.Secret,
-		allowOrigins:   cfg.Server.AllowOrigins,
-		trustedProxies: cfg.Server.TrustedProxies,
+// New 创建 grpc-gateway 代理
+func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, error) {
+	p := &Proxy{
+		jwtSecret: cfg.Jwt.Secret,
+		origins:   cfg.Server.AllowOrigins,
+		proxies:   cfg.Server.TrustedProxies,
 	}
 
 	// 创建 Redis 客户端（连接池配置）
@@ -63,7 +65,6 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		MaxRetries:   3,
 	})
 
-	// 带重试的 Redis 连接验证（5 次指数退避）
 	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "redis",
 		func(rCtx context.Context) error {
 			pingCtx, pingCancel := context.WithTimeout(rCtx, 5*time.Second)
@@ -73,14 +74,13 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 	); err != nil {
 		return nil, fmt.Errorf("failed to connect redis after retries: %w", err)
 	}
-	proxy.rdb = rdb
+	p.rdb = rdb
 	pkglog.L().Info("redis connected", zap.String("addr", cfg.Redis.Addr))
 
 	// 创建 etcd client（用于服务发现，带重试）
 	var etcdClient *clientv3.Client
 	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "etcd",
 		func(rCtx context.Context) error {
-			// 关闭前一次重试创建的连接，防止泄漏
 			if etcdClient != nil {
 				etcdClient.Close()
 			}
@@ -94,25 +94,30 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 	); err != nil {
 		return nil, fmt.Errorf("failed to connect etcd after retries: %w", err)
 	}
-	proxy.etcdClient = etcdClient
+	p.etcdClient = etcdClient
 
-	// 创建 kratos etcd registry（实现 registry.Discovery）
 	etcdRegistry := etcdreg.New(etcdClient)
-
-	// 用 discovery.NewBuilder 将 registry 包装为 gRPC resolver.Builder
 	discoveryBuilder := discovery.NewBuilder(
 		etcdRegistry,
 		discovery.WithInsecure(true),
 		discovery.PrintDebugLog(false),
 	)
 
-	// gRPC 连接选项（keepalive 保活 + otel 追踪 + retry 重试 + 健康检查）
+	// gRPC 连接选项（keepalive + otel + retry + 熔断器）
+	cbCfg := &circuitbreaker.Config{
+		MaxRequests:  cfg.GrpcClient.CircuitBreaker.MaxRequests,
+		Interval:     cfg.GrpcClient.CircuitBreaker.Interval,
+		Timeout:      cfg.GrpcClient.CircuitBreaker.Timeout,
+		FailureRatio: cfg.GrpcClient.CircuitBreaker.FailureRatio,
+		MinRequests:  cfg.GrpcClient.CircuitBreaker.MinRequests,
+	}
+
 	dialOpts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithResolvers(discoveryBuilder),
 		grpc.WithDefaultServiceConfig(cfg.GrpcClient.BuildServiceConfig()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-		grpc.WithUnaryInterceptor(circuitBreakerUnaryInterceptor(&cfg.GrpcClient.CircuitBreaker)),
+		grpc.WithUnaryInterceptor(circuitbreaker.UnaryInterceptor(cbCfg)),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(cfg.GrpcClient.MaxRecvMsgSize*1024*1024),
 			grpc.MaxCallSendMsgSize(cfg.GrpcClient.MaxSendMsgSize*1024*1024),
@@ -123,24 +128,22 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 		}),
 	}
 
-	// 创建 grpc-gateway ServeMux
-	proxy.mux = runtime.NewServeMux(
+	p.mux = runtime.NewServeMux(
 		runtime.WithErrorHandler(runtime.DefaultHTTPErrorHandler),
 	)
 
 	ctx := context.Background()
 
-	// 逐个连接并注册服务
 	for _, svc := range services {
 		conn, err := grpc.NewClient("discovery:///"+svc.Name, dialOpts...)
 		if err != nil {
-			proxy.Close()
+			p.Close()
 			return nil, fmt.Errorf("failed to connect %s service: %w", svc.Name, err)
 		}
-		proxy.conns = append(proxy.conns, conn)
+		p.conns = append(p.conns, conn)
 
-		if err := svc.RegisterHandler(ctx, proxy.mux, conn); err != nil {
-			proxy.Close()
+		if err := svc.RegisterHandler(ctx, p.mux, conn); err != nil {
+			p.Close()
 			return nil, fmt.Errorf("failed to register %s handler: %w", svc.Name, err)
 		}
 
@@ -148,21 +151,31 @@ func NewGatewayProxy(cfg *AppConfig) (*GatewayProxy, error) {
 	}
 
 	// 预构建 otel handler（panic recovery → OpenTelemetry → CORS → security headers → JWT 认证 → grpc-gateway mux）
-	proxy.otelHandler = otelhttp.NewHandler(
-		recoverMiddleware(corsMiddleware(proxy.allowOrigins)(securityHeadersMiddleware(jwtAuth(proxy.jwtSecret, proxy.rdb, proxy.trustedProxies, proxy.mux)))),
+	p.otelHandler = otelhttp.NewHandler(
+		auth.RecoverMiddleware(auth.CORSMiddleware(p.origins)(auth.SecurityHeadersMiddleware(auth.JWTAuth(p.jwtSecret, p.rdb, p.proxies, p.mux)))),
 		"gateway",
 	)
 
-	return proxy, nil
+	return p, nil
 }
 
-// ServeHTTP 实现 http.Handler 接口（OpenTelemetry → JWT 认证 → grpc-gateway mux）
-func (p *GatewayProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+// ServeHTTP 实现 http.Handler 接口
+func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	p.otelHandler.ServeHTTP(w, r)
 }
 
+// Rdb 返回 Redis 客户端（供健康检查使用）
+func (p *Proxy) Rdb() *redis.Client {
+	return p.rdb
+}
+
+// EtcdClient 返回 etcd 客户端（供健康检查使用）
+func (p *Proxy) EtcdClient() *clientv3.Client {
+	return p.etcdClient
+}
+
 // Close 关闭所有连接
-func (p *GatewayProxy) Close() {
+func (p *Proxy) Close() {
 	pkglog.L().Info("gateway proxy closing connections...")
 	for _, conn := range p.conns {
 		if conn != nil {

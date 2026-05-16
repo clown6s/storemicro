@@ -1,4 +1,4 @@
-package main
+package appconfig
 
 import (
 	"encoding/json"
@@ -143,13 +143,14 @@ func DefaultAppConfig() *AppConfig {
 	}
 }
 
-// expandEnv 支持 ${VAR:default} 和 ${VAR} / $VAR 语法
+// ExpandEnv 支持 ${VAR:default} 和 ${VAR} / $VAR 语法
 // 使用单次正则匹配处理所有格式，避免 os.ExpandEnv 双重展开导致密码含 $ 时被截断
-var envPattern = regexp.MustCompile(`\$\{(\w+):([^}]*)\}|\$\{(\w+)\}|\$(\w+)`)
+var EnvPattern = regexp.MustCompile(`\$\{(\w+):([^}]*)\}|\$\{(\w+)\}|\$(\w+)`)
 
-func expandEnv(s string) string {
-	return envPattern.ReplaceAllStringFunc(s, func(match string) string {
-		sub := envPattern.FindStringSubmatch(match)
+// ExpandEnv 执行环境变量展开
+func ExpandEnv(s string) string {
+	return EnvPattern.ReplaceAllStringFunc(s, func(match string) string {
+		sub := EnvPattern.FindStringSubmatch(match)
 		if sub[1] != "" {
 			// ${VAR:default}
 			if val, ok := os.LookupEnv(sub[1]); ok {
@@ -169,8 +170,8 @@ func expandEnv(s string) string {
 	})
 }
 
-// LoadAppConfig 从 YAML 文件加载应用配置
-func LoadAppConfig(path string) (*AppConfig, error) {
+// Load 从 YAML 文件加载应用配置
+func Load(path string) (*AppConfig, error) {
 	cfg := DefaultAppConfig()
 
 	data, err := os.ReadFile(path)
@@ -179,7 +180,7 @@ func LoadAppConfig(path string) (*AppConfig, error) {
 	}
 
 	// 展开环境变量 ${VAR:default} 语法
-	expanded := expandEnv(string(data))
+	expanded := ExpandEnv(string(data))
 
 	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
 		return nil, err

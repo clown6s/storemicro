@@ -3,7 +3,6 @@ package biz
 import (
 	"context"
 	"errors"
-	"log"
 	"regexp"
 
 	"user/internal/pkg/jwt"
@@ -24,31 +23,32 @@ var ProviderSet = wire.NewSet(NewUserUsecase)
 
 // 统一错误变量，避免业务逻辑散落字符串字面量
 var (
-	ErrUserNotFound     = errors.New("user not found")
-	ErrPhoneRequired    = errors.New("phone is required")
-	ErrPasswordRequired = errors.New("password is required")
-	ErrPhoneExists      = errors.New("phone already exists")
-	ErrEmailExists      = errors.New("email already exists")
-	ErrInvalidUserID    = errors.New("invalid user id")
-	ErrNothingToUpdate  = errors.New("nothing to update")
-	ErrWrongCredentials = errors.New("phone or password incorrect")
-	ErrTokenRequired    = errors.New("token is required")
-	ErrGenerateToken    = errors.New("generate token failed")
-	ErrStoreToken       = errors.New("store token failed")
-	ErrEncryptPassword  = errors.New("password encryption failed")
-	ErrInvalidPhone     = errors.New("invalid phone format")
-	ErrInvalidEmail     = errors.New("invalid email format")
-	ErrPasswordTooShort = errors.New("password too short (min 8)")
-	ErrPasswordTooLong  = errors.New("password too long (max 72 bytes)")
-	ErrPasswordNoUpper  = errors.New("password must contain at least one uppercase letter")
-	ErrPasswordNoLower  = errors.New("password must contain at least one lowercase letter")
-	ErrPasswordNoDigit  = errors.New("password must contain at least one digit")
-	ErrNameTooLong      = errors.New("real name too long (max 50)")
-	ErrRemarkTooLong    = errors.New("remark too long (max 200)")
-	ErrAvatarTooLong    = errors.New("avatar URL too long (max 500)")
-	ErrEmailTooLong     = errors.New("email too long (max 254)")
-	ErrInvalidGender    = errors.New("gender must be 0 (unknown), 1 (male), or 2 (female)")
-	ErrInvalidAge       = errors.New("age must be between 0 and 150")
+	ErrUserNotFound      = errors.New("user not found")
+	ErrPhoneRequired     = errors.New("phone is required")
+	ErrPasswordRequired  = errors.New("password is required")
+	ErrPhoneExists       = errors.New("phone already exists")
+	ErrEmailExists       = errors.New("email already exists")
+	ErrInvalidUserID     = errors.New("invalid user id")
+	ErrNothingToUpdate   = errors.New("nothing to update")
+	ErrWrongCredentials  = errors.New("phone or password incorrect")
+	ErrTokenRequired     = errors.New("token is required")
+	ErrGenerateToken     = errors.New("generate token failed")
+	ErrStoreToken        = errors.New("store token failed")
+	ErrEncryptPassword   = errors.New("password encryption failed")
+	ErrInvalidPhone      = errors.New("invalid phone format")
+	ErrInvalidEmail      = errors.New("invalid email format")
+	ErrPasswordTooShort  = errors.New("password too short (min 8)")
+	ErrPasswordTooLong   = errors.New("password too long (max 72 bytes)")
+	ErrPasswordNoUpper   = errors.New("password must contain at least one uppercase letter")
+	ErrPasswordNoLower   = errors.New("password must contain at least one lowercase letter")
+	ErrPasswordNoDigit   = errors.New("password must contain at least one digit")
+	ErrPasswordNoSpecial = errors.New("password must contain at least one special character")
+	ErrNameTooLong       = errors.New("real name too long (max 50)")
+	ErrRemarkTooLong     = errors.New("remark too long (max 200)")
+	ErrAvatarTooLong     = errors.New("avatar URL too long (max 500)")
+	ErrEmailTooLong      = errors.New("email too long (max 254)")
+	ErrInvalidGender     = errors.New("gender must be 0 (unknown), 1 (male), or 2 (female)")
+	ErrInvalidAge        = errors.New("age must be between 0 and 150")
 )
 
 // 手机号和邮箱格式正则
@@ -58,6 +58,7 @@ var (
 	hasUpper   = regexp.MustCompile(`[A-Z]`)
 	hasLower   = regexp.MustCompile(`[a-z]`)
 	hasDigit   = regexp.MustCompile(`\d`)
+	hasSpecial = regexp.MustCompile(`[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?~]`)
 )
 
 // [C3] 用于 timing-safe login 的 dummy bcrypt hash（cost=10, 随机 salt）
@@ -68,7 +69,7 @@ func init() {
 	var err error
 	dummyHash, err = bcrypt.GenerateFromPassword([]byte("dummy-timing-safe-hash"), bcrypt.DefaultCost)
 	if err != nil {
-		log.Fatalf("failed to generate dummy bcrypt hash: %v", err)
+		panic("failed to generate dummy bcrypt hash for timing-safe login: " + err.Error())
 	}
 }
 
@@ -141,6 +142,9 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	}
 	if !hasDigit.MatchString(user.Password) {
 		return ErrPasswordNoDigit
+	}
+	if !hasSpecial.MatchString(user.Password) {
+		return ErrPasswordNoSpecial
 	}
 	if user.Email != "" {
 		if len(user.Email) > 254 {

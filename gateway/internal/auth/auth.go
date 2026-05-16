@@ -1,4 +1,4 @@
-package main
+package auth
 
 import (
 	"context"
@@ -19,8 +19,8 @@ import (
 	"go.uber.org/zap"
 )
 
-// recoverMiddleware 全局 panic recovery，防止未捕获 panic 导致 goroutine 崩溃
-func recoverMiddleware(next http.Handler) http.Handler {
+// RecoverMiddleware 全局 panic recovery，防止未捕获 panic 导致 goroutine 崩溃
+func RecoverMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -28,14 +28,14 @@ func recoverMiddleware(next http.Handler) http.Handler {
 					zap.Any("error", rec),
 					zap.Stack("stack"),
 				)
-				writeJSON(w, http.StatusInternalServerError, `{"code":500,"message":"internal server error"}`)
+				WriteJSON(w, http.StatusInternalServerError, `{"code":500,"message":"internal server error"}`)
 			}
 		}()
 		next.ServeHTTP(w, r)
 	})
 }
 
-func securityHeadersMiddleware(next http.Handler) http.Handler {
+func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -49,7 +49,7 @@ func securityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func corsMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
+func CORSMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 	originSet := make(map[string]struct{}, len(allowOrigins))
 	for _, o := range allowOrigins {
 		o = strings.TrimSpace(o)
@@ -64,7 +64,7 @@ func corsMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
 			if origin != "" {
-				if isAllowedOrigin(origin, originSet) {
+				if IsAllowedOrigin(origin, originSet) {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
 					w.Header().Add("Vary", "Origin")
 					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -82,9 +82,8 @@ func corsMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 	}
 }
 
-// isAllowedOrigin 检查 origin 是否在允许列表中，支持通配符子域名匹配 (*.example.com)
-// R4-SEC-02: 添加通配符子域名匹配支持
-func isAllowedOrigin(origin string, allowed map[string]struct{}) bool {
+// IsAllowedOrigin 检查 origin 是否在允许列表中，支持通配符子域名匹配 (*.example.com)
+func IsAllowedOrigin(origin string, allowed map[string]struct{}) bool {
 	// 精确匹配
 	if _, ok := allowed[origin]; ok {
 		return true
@@ -114,31 +113,27 @@ func isAllowedOrigin(origin string, allowed map[string]struct{}) bool {
 	return false
 }
 
+// Claims JWT claims
 type Claims struct {
 	UserID int64 `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
-type contextKey string
+// ContextKey context key 类型
+type ContextKey string
 
-const (
-	ContextKeyUserID contextKey = "user_id"
-)
+// ContextKeyUserID 用户ID context key
+const ContextKeyUserID ContextKey = "user_id"
 
-// noAuthRoutes is exact METHOD+path allowlist. Do not use prefix matching here.
-var noAuthRoutes = map[string]struct{}{
+// NoAuthRoutes 免认证路由白名单
+var NoAuthRoutes = map[string]struct{}{
 	"POST /api/v1/user/register": {},
 	"POST /api/v1/user/login":    {},
 	"GET /healthz":               {},
 }
 
-// [H2] rateLimitScript Lua 脚本原子化限流操作
-// KEYS[1] = 限流 key
-// ARGV[1] = 窗口起始时间（毫秒），ARGV[2] = 当前时间（毫秒），ARGV[3] = 最大请求数，ARGV[4] = 过期秒数，ARGV[5] = 加密随机数
-// 流程：清理过期成员 → 统计窗口内请求数 → 添加新请求 → 设置过期
-// 全部在 Lua 中原子执行，避免 Pipeline 非原子竞态
-// R4-SEC-03: 移除了 math.random()，改用 Go 层传入的 crypto/rand 随机数
-var rateLimitScript = redis.NewScript(`
+// RateLimitScript Lua 脚本原子化限流操作
+var RateLimitScript = redis.NewScript(`
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '0', ARGV[1])
 local count = redis.call('ZCARD', KEYS[1])
 if tonumber(count) >= tonumber(ARGV[3]) then
@@ -149,43 +144,44 @@ redis.call('EXPIRE', KEYS[1], ARGV[4])
 return count + 1
 `)
 
-type redisRateLimiter struct {
-	rdb         *redis.Client
-	maxRequests int64
-	windowSec   int64
+// RateLimiter Redis 滑动窗口限流器
+type RateLimiter struct {
+	Rdb         *redis.Client
+	MaxRequests int64
+	WindowSec   int64
 }
 
-func newRedisRateLimiter(rdb *redis.Client, max, window int) *redisRateLimiter {
-	return &redisRateLimiter{
-		rdb:         rdb,
-		maxRequests: int64(max),
-		windowSec:   int64(window),
+// NewRateLimiter 创建限流器
+func NewRateLimiter(rdb *redis.Client, max, window int) *RateLimiter {
+	return &RateLimiter{
+		Rdb:         rdb,
+		MaxRequests: int64(max),
+		WindowSec:   int64(window),
 	}
 }
 
-func (rl *redisRateLimiter) allow(ctx context.Context, key string) bool {
+// Allow 检查是否允许请求通过
+func (rl *RateLimiter) Allow(ctx context.Context, key string) bool {
 	now := time.Now().UnixMilli()
-	windowStart := now - rl.windowSec*1000
+	windowStart := now - rl.WindowSec*1000
 
-	// R4-SEC-03: 使用 crypto/rand 生成加密安全的随机数
 	var randBytes [8]byte
 	if _, err := rand.Read(randBytes[:]); err != nil {
 		pkglog.L().Warn("rate limiter: crypto/rand failed, using fallback",
 			zap.String("key", key),
 			zap.Error(err),
 		)
-		// 熵源失败时使用时间戳+随机 math.random 作为 fallback
 		randBytes[0] = byte(now & 0xFF)
 		randBytes[1] = byte((now >> 8) & 0xFF)
 	}
 	randStr := fmt.Sprintf("%016x", binary.BigEndian.Uint64(randBytes[:]))
 
-	result, err := rateLimitScript.Run(ctx, rl.rdb,
+	result, err := RateLimitScript.Run(ctx, rl.Rdb,
 		[]string{key},
 		strconv.FormatInt(windowStart, 10),
 		strconv.FormatInt(now, 10),
-		strconv.FormatInt(rl.maxRequests, 10),
-		strconv.FormatInt(rl.windowSec, 10),
+		strconv.FormatInt(rl.MaxRequests, 10),
+		strconv.FormatInt(rl.WindowSec, 10),
 		randStr,
 	).Int64()
 
@@ -196,28 +192,27 @@ func (rl *redisRateLimiter) allow(ctx context.Context, key string) bool {
 		)
 		return false
 	}
-	return result <= rl.maxRequests
+	return result <= rl.MaxRequests
 }
 
-func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next http.Handler) http.Handler {
-	rateLimitRoutes := map[string]*redisRateLimiter{
-		"POST /api/v1/user/login":    newRedisRateLimiter(rdb, 5, 60),
-		"POST /api/v1/user/register": newRedisRateLimiter(rdb, 3, 60),
+// JWTAuth JWT 认证 + 限流中间件
+func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next http.Handler) http.Handler {
+	rateLimitRoutes := map[string]*RateLimiter{
+		"POST /api/v1/user/login":    NewRateLimiter(rdb, 5, 60),
+		"POST /api/v1/user/register": NewRateLimiter(rdb, 3, 60),
 	}
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// 标准化路径用于路由匹配和限流 key，防止 // 或 ./ 绕过限流
 		rawPath := r.URL.Path
 		cleaned := path.Clean(rawPath)
-		route := routeKey(r.Method, cleaned)
+		route := RouteKey(r.Method, cleaned)
 
-		if isNoAuthRoute(r.Method, rawPath) {
+		if IsNoAuthRoute(r.Method, rawPath) {
 			if limiter, ok := rateLimitRoutes[route]; ok {
-				ip := extractIP(r, trustedProxies)
-				if !limiter.allow(r.Context(), "storemicro:rl:"+cleaned+":"+ip) {
-					// R4-SEC-04: IP 脱敏日志
-					pkglog.L().Warn("rate limited", zap.String("path", cleaned), zap.String("ip", maskIP(ip)))
-					writeJSON(w, http.StatusTooManyRequests, `{"code":429,"message":"too many requests"}`)
+				ip := ExtractIP(r, trustedProxies)
+				if !limiter.Allow(r.Context(), "storemicro:rl:"+cleaned+":"+ip) {
+					pkglog.L().Warn("rate limited", zap.String("path", cleaned), zap.String("ip", MaskIP(ip)))
+					WriteJSON(w, http.StatusTooManyRequests, `{"code":429,"message":"too many requests"}`)
 					return
 				}
 			}
@@ -231,7 +226,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 				zap.String("path", cleaned),
 				zap.String("remote", r.RemoteAddr),
 			)
-			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"missing token"}`)
+			WriteJSON(w, http.StatusUnauthorized, `{"code":401,"message":"missing token"}`)
 			return
 		}
 
@@ -251,13 +246,13 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 				zap.String("path", cleaned),
 				zap.Error(err),
 			)
-			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
+			WriteJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
 			return
 		}
 
 		claims, ok := token.Claims.(*Claims)
 		if !ok {
-			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid claims"}`)
+			WriteJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid claims"}`)
 			return
 		}
 
@@ -271,7 +266,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 				zap.String("path", cleaned),
 				zap.Int64("user_id", claims.UserID),
 			)
-			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
+			WriteJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
 			return
 		} else if err != nil {
 			pkglog.L().Error("redis check token failed, fail-closed",
@@ -279,7 +274,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 				zap.Int64("user_id", claims.UserID),
 				zap.Error(err),
 			)
-			writeJSON(w, http.StatusServiceUnavailable, `{"code":503,"message":"service temporarily unavailable"}`)
+			WriteJSON(w, http.StatusServiceUnavailable, `{"code":503,"message":"service temporarily unavailable"}`)
 			return
 		}
 
@@ -290,7 +285,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 				zap.Int64("jwt_user_id", claims.UserID),
 				zap.String("redis_value", val),
 			)
-			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
+			WriteJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
 			return
 		}
 
@@ -299,37 +294,37 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 	})
 }
 
-func routeKey(method, path string) string {
+// RouteKey 生成路由键
+func RouteKey(method, path string) string {
 	return method + " " + path
 }
 
-// isNoAuthRoute 检查请求是否在免认证白名单中
-// 先 URL 解码再做 path.Clean 标准化，防止编码绕过和路径穿越
-func isNoAuthRoute(method, rawPath string) bool {
+// IsNoAuthRoute 检查请求是否在免认证白名单中
+func IsNoAuthRoute(method, rawPath string) bool {
 	unescaped, err := url.PathUnescape(rawPath)
 	if err != nil {
 		return false
 	}
 	cleaned := path.Clean(unescaped)
-	_, allowed := noAuthRoutes[method+" "+cleaned]
+	_, allowed := NoAuthRoutes[method+" "+cleaned]
 	return allowed
 }
 
-func writeJSON(w http.ResponseWriter, code int, body string) {
+// WriteJSON 写入 JSON 响应
+func WriteJSON(w http.ResponseWriter, code int, body string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	_, _ = w.Write([]byte(body))
 }
 
-func extractIP(r *http.Request, trustedProxies []string) string {
+// ExtractIP 从请求中提取客户端 IP（支持可信代理 X-Forwarded-For）
+func ExtractIP(r *http.Request, trustedProxies []string) string {
 	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 
 	if isTrustedProxy(remoteHost, trustedProxies) {
-		// X-Forwarded-For: client, proxy1, proxy2, ...
-		// 从右向左遍历，跳过可信代理，第一个不可信 IP 即为真实客户端
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			ips := strings.Split(xff, ",")
 			for i := len(ips) - 1; i >= 0; i-- {
@@ -341,7 +336,6 @@ func extractIP(r *http.Request, trustedProxies []string) string {
 					return ip
 				}
 			}
-			// 所有 XFF 中的 IP 都是可信代理，取最左侧（原始客户端）
 			for _, ip := range ips {
 				ip = strings.TrimSpace(ip)
 				if ip != "" && net.ParseIP(ip) != nil {
@@ -387,10 +381,8 @@ func isTrustedProxy(ip string, trustedProxies []string) bool {
 	return false
 }
 
-// maskIP 脱敏 IP 地址：保留前两个八位组，隐藏后两部分 (GDPR 合规)
-// 例如: 192.168.1.100 → 192.168.x.x
-// R4-SEC-04: IP 脱敏以满足隐私合规要求
-func maskIP(ip string) string {
+// MaskIP 脱敏 IP 地址：保留前两个八位组，隐藏后两部分 (GDPR 合规)
+func MaskIP(ip string) string {
 	parsed := net.ParseIP(ip)
 	if parsed == nil {
 		return "unknown"

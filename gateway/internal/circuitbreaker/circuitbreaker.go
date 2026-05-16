@@ -1,4 +1,4 @@
-package main
+package circuitbreaker
 
 import (
 	"context"
@@ -12,20 +12,29 @@ import (
 	"google.golang.org/grpc"
 )
 
-// cbStore 按服务名隔离的熔断器存储
-type cbStore struct {
+// Config 熔断器配置（引用 appconfig 包的类型会导致循环依赖，所以重新定义）
+type Config struct {
+	MaxRequests  int
+	Interval     int // 秒
+	Timeout      int // 秒
+	FailureRatio float64
+	MinRequests  int
+}
+
+// store 按服务名隔离的熔断器存储
+type store struct {
 	mu  sync.RWMutex
 	cbs map[string]*gobreaker.CircuitBreaker
-	cfg *CircuitBreakerConfig
+	cfg *Config
 }
 
 var (
-	globalCB   *cbStore
-	initCBOnce sync.Once // [I5] 防止重复初始化
+	globalCB   *store
+	initCBOnce sync.Once
 )
 
-// initCBStore 初始化熔断器存储（应用启动时调用一次）
-func initCBStore(cfg *CircuitBreakerConfig) {
+// Init 初始化熔断器存储（应用启动时调用一次）
+func Init(cfg *Config) {
 	initCBOnce.Do(func() {
 		if cfg.MaxRequests <= 0 {
 			cfg.MaxRequests = 5
@@ -45,15 +54,14 @@ func initCBStore(cfg *CircuitBreakerConfig) {
 		if cfg.MinRequests <= 0 {
 			cfg.MinRequests = 10
 		}
-		globalCB = &cbStore{
+		globalCB = &store{
 			cbs: make(map[string]*gobreaker.CircuitBreaker),
 			cfg: cfg,
 		}
 	})
 }
 
-// getCB 获取指定服务的熔断器（不存在则创建）
-func (s *cbStore) getCB(serviceName string) *gobreaker.CircuitBreaker {
+func (s *store) getCB(serviceName string) *gobreaker.CircuitBreaker {
 	s.mu.RLock()
 	cb, ok := s.cbs[serviceName]
 	s.mu.RUnlock()
@@ -63,7 +71,6 @@ func (s *cbStore) getCB(serviceName string) *gobreaker.CircuitBreaker {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// double check
 	if cb, ok = s.cbs[serviceName]; ok {
 		return cb
 	}
@@ -92,8 +99,7 @@ func (s *cbStore) getCB(serviceName string) *gobreaker.CircuitBreaker {
 }
 
 // extractServiceName 从 gRPC 方法名解析服务名
-// 方法格式 "/user.User/GetUser" → "user"
-func extractServiceName(ctx context.Context, method string) string {
+func extractServiceName(method string) string {
 	for i, c := range method {
 		if c == '/' {
 			method = method[i+1:]
@@ -108,12 +114,12 @@ func extractServiceName(ctx context.Context, method string) string {
 	return method
 }
 
-// circuitBreakerUnaryInterceptor 返回按服务隔离的 gRPC 一元拦截器
-func circuitBreakerUnaryInterceptor(cfg *CircuitBreakerConfig) grpc.UnaryClientInterceptor {
-	initCBStore(cfg)
+// UnaryInterceptor 返回按服务隔离的 gRPC 一元拦截器
+func UnaryInterceptor(cfg *Config) grpc.UnaryClientInterceptor {
+	Init(cfg)
 
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		serviceName := extractServiceName(ctx, method)
+		serviceName := extractServiceName(method)
 		cb := globalCB.getCB(serviceName)
 		_, err := cb.Execute(func() (interface{}, error) {
 			return nil, invoker(ctx, method, req, reply, cc, opts...)
