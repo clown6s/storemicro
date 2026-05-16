@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync/atomic"
 
 	"github.com/go-kratos/kratos/v2/log"
 	"go.uber.org/zap"
@@ -11,7 +12,8 @@ import (
 	"gopkg.in/natefinch/lumberjack.v2"
 )
 
-var globalLog *zap.Logger
+// globalLog 使用 atomic.Pointer 保护并发读写（New 写入，L 读取）
+var globalLog atomic.Pointer[zap.Logger]
 
 // Config 日志配置
 type Config struct {
@@ -53,8 +55,9 @@ func New(cfg Config) log.Logger {
 	core := zapcore.NewTee(cores...)
 
 	// 业务代码用：通过 zap.L() / L() 获取
-	globalLog = zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
-	_ = zap.ReplaceGlobals(globalLog)
+	logger := zap.New(core, zap.AddCaller(), zap.AddStacktrace(zapcore.ErrorLevel))
+	globalLog.Store(logger)
+	_ = zap.ReplaceGlobals(logger)
 
 	// Kratos 桥接用：Skip 2 层（log.Helper -> ZapLogger.Log -> kratos 调用方）
 	kratosLogger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(2))
@@ -63,11 +66,12 @@ func New(cfg Config) log.Logger {
 
 // L 返回全局 *zap.Logger，供业务代码直接使用（等同于 zap.L()）
 // [I3] 如果 New() 尚未调用，返回 nop logger 避免空指针 panic
+// [S1] 使用 atomic.Pointer 保证并发安全
 func L() *zap.Logger {
-	if globalLog == nil {
-		return zap.NewNop()
+	if l := globalLog.Load(); l != nil {
+		return l
 	}
-	return globalLog
+	return zap.NewNop()
 }
 
 // buildWriters 构造日志输出目标列表

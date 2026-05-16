@@ -136,7 +136,7 @@ func keepAlive(etcdClient *clientv3.Client, leaseID clientv3.LeaseID, key string
 	}
 }
 
-// retryKeepAliveOnce 租约丢失后尝试重新抢锁（单次尝试，在同一 goroutine 中执行）
+// retryKeepAliveOnce 租约丢失后尝试重新抢锁（多次重试 + 指数退避，在同一 goroutine 中执行）
 func retryKeepAliveOnce(etcdClient *clientv3.Client, key string) bool {
 	ctx := shutdownCtx
 
@@ -146,70 +146,86 @@ func retryKeepAliveOnce(etcdClient *clientv3.Client, key string) bool {
 	default:
 	}
 
-	// 可取消等待，避免 time.Sleep 阻塞进程关闭
-	timer := time.NewTimer(5 * time.Second)
-	select {
-	case <-ctx.Done():
-		timer.Stop()
-		return false
-	case <-timer.C:
-	}
-
-	select {
-	case <-ctx.Done():
-		return false
-	default:
-	}
-
-	lease, err := etcdClient.Grant(ctx, leaseTTL)
-	if err != nil {
-		zap.L().Error("snowflake: retry grant failed", zap.Error(err))
-		return false
-	}
-
-	txn := etcdClient.Txn(ctx).
-		If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
-		Then(clientv3.OpPut(key, "1", clientv3.WithLease(lease.ID)))
-
-	resp, err := txn.Commit()
-	if err != nil {
-		zap.L().Error("snowflake: retry txn failed", zap.Error(err))
-		_, _ = etcdClient.Revoke(ctx, lease.ID)
-		return false
-	}
-
-	if !resp.Succeeded {
-		_, _ = etcdClient.Revoke(ctx, lease.ID)
-		zap.L().Error("snowflake: failed to re-acquire node_id, GenID is permanently disabled - please restart instance")
-		return false
-	}
-
-	ch, err := etcdClient.KeepAlive(ctx, lease.ID)
-	if err != nil {
-		zap.L().Error("snowflake: retry keep-alive failed", zap.Error(err))
-		_, _ = etcdClient.Revoke(ctx, lease.ID)
-		return false
-	}
-
-	readyMu.Lock()
-	nodeReady = true
-	readyMu.Unlock()
-
-	// 继续消费新的 keep-alive 通道
-	for {
+	const maxAttempts = 3
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
 		select {
 		case <-ctx.Done():
-			return true
-		case _, ok := <-ch:
-			if !ok {
-				readyMu.Lock()
-				nodeReady = false
-				readyMu.Unlock()
-				zap.L().Error("snowflake: re-acquired keep-alive lost again, GenID disabled - please restart instance")
+			return false
+		default:
+		}
+
+		// 指数退避等待（2s, 6s）
+		if attempt > 1 {
+			wait := time.Duration(attempt*attempt) * time.Second
+			timer := time.NewTimer(wait)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return false
+			case <-timer.C:
+			}
+			select {
+			case <-ctx.Done():
+				return false
+			default:
+			}
+		}
+
+		lease, err := etcdClient.Grant(ctx, leaseTTL)
+		if err != nil {
+			zap.L().Error("snowflake: retry grant failed", zap.Int("attempt", attempt), zap.Int("max", maxAttempts), zap.Error(err))
+			continue
+		}
+
+		txn := etcdClient.Txn(ctx).
+			If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
+			Then(clientv3.OpPut(key, "1", clientv3.WithLease(lease.ID)))
+
+		resp, err := txn.Commit()
+		if err != nil {
+			zap.L().Error("snowflake: retry txn failed", zap.Int("attempt", attempt), zap.Int("max", maxAttempts), zap.Error(err))
+			_, _ = etcdClient.Revoke(ctx, lease.ID)
+			continue
+		}
+
+		if !resp.Succeeded {
+			_, _ = etcdClient.Revoke(ctx, lease.ID)
+			zap.L().Error("snowflake: failed to re-acquire node_id", zap.Int("attempt", attempt), zap.Int("max", maxAttempts))
+			continue
+		}
+
+		ch, err := etcdClient.KeepAlive(ctx, lease.ID)
+		if err != nil {
+			zap.L().Error("snowflake: retry keep-alive failed", zap.Int("attempt", attempt), zap.Int("max", maxAttempts), zap.Error(err))
+			_, _ = etcdClient.Revoke(ctx, lease.ID)
+			continue
+		}
+
+		readyMu.Lock()
+		nodeReady = true
+		readyMu.Unlock()
+
+		zap.L().Info("snowflake: successfully re-acquired lease", zap.Int("attempt", attempt))
+
+		// 继续消费新的 keep-alive 通道
+		for {
+			select {
+			case <-ctx.Done():
 				return true
+			case _, ok := <-ch:
+				if !ok {
+					readyMu.Lock()
+					nodeReady = false
+					readyMu.Unlock()
+					zap.L().Error("snowflake: re-acquired keep-alive lost again, GenID disabled - please restart instance")
+					return true
+				}
 			}
 		}
 	}
+
+	zap.L().Error("snowflake: all re-acquire attempts exhausted, GenID permanently disabled - please restart instance")
+	return false
 }
 
 // GenID 生成一个雪花 ID

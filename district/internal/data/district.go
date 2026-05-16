@@ -31,10 +31,10 @@ func (d districtRepo) Get(ctx context.Context, adCode string) ([]*biz.District, 
 		// 显式限制递归深度防止循环引用数据导致资源耗尽
 		query = `
 WITH RECURSIVE ancestors AS (
-    -- 向上回溯：从给定节点找到省级根节点
+    -- 向上回溯：从给定节点找到省级根节点（排除 country 层级）
     SELECT id, parent_adcode, adcode, name, level, center, 1 AS depth
     FROM district
-    WHERE adcode = ?
+    WHERE adcode = ? AND level != 'country'
     UNION ALL
     SELECT d.id, d.parent_adcode, d.adcode, d.name, d.level, d.center, a.depth + 1
     FROM district d
@@ -61,7 +61,7 @@ district_tree AS (
 SELECT id, parent_adcode, adcode, name, level, center FROM district_tree`
 		args = append(args, adCode)
 	} else {
-		query = `SELECT id, parent_adcode, adcode, name, level, center FROM district WHERE level != 'country' LIMIT 50000`
+		query = `SELECT id, parent_adcode, adcode, name, level, center FROM district WHERE level != 'country' ORDER BY adcode LIMIT 10000`
 	}
 
 	rows, err := d.data.db.QueryContext(ctx, query, args...)

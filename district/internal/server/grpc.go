@@ -3,6 +3,8 @@ package server
 import (
 	"time"
 
+	sgrpc "google.golang.org/grpc"
+
 	districtv1 "district/api/district/v1"
 	"district/internal/conf"
 	"district/internal/service"
@@ -12,14 +14,14 @@ import (
 	"github.com/go-kratos/kratos/v2/middleware/logging"
 	"github.com/go-kratos/kratos/v2/middleware/recovery"
 	"github.com/go-kratos/kratos/v2/middleware/tracing"
-	"github.com/go-kratos/kratos/v2/transport/grpc"
+	kratosgrpc "github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/google/wire"
 )
 
 var ProviderSet = wire.NewSet(NewGRPCServer)
 
 // NewGRPCServer 创建 gRPC 服务器
-func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.DistrictService) *grpc.Server {
+func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.DistrictService) *kratosgrpc.Server {
 	if c.Grpc == nil {
 		panic("grpc server config must not be nil, check config.yaml server.grpc section")
 	}
@@ -27,17 +29,19 @@ func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.DistrictServi
 	if t := c.Grpc.Timeout; t != nil {
 		timeout = t.AsDuration()
 	}
-	opts := []grpc.ServerOption{
-		grpc.Address(c.Grpc.Addr),
-		grpc.Timeout(timeout),
-		grpc.Middleware(
+	opts := []kratosgrpc.ServerOption{
+		kratosgrpc.Address(c.Grpc.Addr),
+		kratosgrpc.Timeout(timeout),
+		// 限制接收消息大小（默认 4MB），防止超大请求导致 OOM
+		kratosgrpc.Options(sgrpc.MaxRecvMsgSize(4 << 20)),
+		kratosgrpc.Middleware(
 			recovery.Recovery(),
 			tracing.Server(),
 			logging.Server(logger),
 			validate.ProtoValidate(),
 		),
 	}
-	srv := grpc.NewServer(opts...)
+	srv := kratosgrpc.NewServer(opts...)
 	districtv1.RegisterDistrictServer(srv, svc)
 	return srv
 }

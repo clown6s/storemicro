@@ -293,6 +293,16 @@ func metricsBearerAuth(next http.Handler, password string) http.Handler {
 	})
 }
 
+// unquoteValue 剥离配对的引号（"value" 或 'value'），不配对时返回原值
+func unquoteValue(s string) string {
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
+}
+
 // loadDotenv 自动加载 .env 文件（配置目录 → 当前目录 → 上级目录），不覆盖已有环境变量
 func loadDotenv(confPath string) {
 	candidates := []string{filepath.Join(confPath, ".env"), ".env", "../.env"}
@@ -316,7 +326,7 @@ func loadDotenv(confPath string) {
 				}
 				key = strings.TrimSpace(key)
 				val = strings.TrimSpace(val)
-				val = strings.Trim(val, `"'`)
+				val = unquoteValue(val)
 				if os.Getenv(key) == "" {
 					os.Setenv(key, val)
 				}

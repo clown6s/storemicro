@@ -195,7 +195,7 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 				return nil, jwt.ErrSignatureInvalid
 			}
 			return []byte(secret), nil
-		})
+		}, jwt.WithAudience("storemicro-api"))
 		if err != nil || !token.Valid {
 			pkglog.L().Warn("jwt auth failed: invalid token",
 				zap.String("path", cleaned),
@@ -234,7 +234,6 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			return
 		}
 		redisCancel()
-		_ = val
 
 		// 校验 Redis 中 token 对应的 userID 与 JWT claims 一致
 		redisUserID, parseErr := strconv.ParseInt(val, 10, 64)
@@ -281,11 +280,25 @@ func extractIP(r *http.Request, trustedProxies []string) string {
 	}
 
 	if isTrustedProxy(remoteHost, trustedProxies) {
+		// X-Forwarded-For: client, proxy1, proxy2, ...
+		// 从右向左遍历，跳过可信代理，第一个不可信 IP 即为真实客户端
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			parts := strings.SplitN(xff, ",", 2)
-			ip := strings.TrimSpace(parts[0])
-			if ip != "" && net.ParseIP(ip) != nil {
-				return ip
+			ips := strings.Split(xff, ",")
+			for i := len(ips) - 1; i >= 0; i-- {
+				ip := strings.TrimSpace(ips[i])
+				if ip == "" || net.ParseIP(ip) == nil {
+					continue
+				}
+				if !isTrustedProxy(ip, trustedProxies) {
+					return ip
+				}
+			}
+			// 所有 XFF 中的 IP 都是可信代理，取最左侧（原始客户端）
+			for _, ip := range ips {
+				ip = strings.TrimSpace(ip)
+				if ip != "" && net.ParseIP(ip) != nil {
+					return ip
+				}
 			}
 		}
 		if rip := r.Header.Get("X-Real-IP"); rip != "" {

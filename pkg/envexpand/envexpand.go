@@ -61,7 +61,8 @@ func (f *envFile) loadFile(path string) (*config.KeyValue, error) {
 	if err != nil {
 		return nil, err
 	}
-	info, err := file.Stat()
+	// 使用 os.Stat 而非 file.Stat()，避免 ReadAll 后文件位置在 EOF 时的潜在问题
+	info, err := os.Stat(path)
 	if err != nil {
 		return nil, err
 	}

@@ -150,18 +150,12 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 			checks["redis"] = "ok"
 		}
 
-		// etcd — 用短超时的 KV Get 验证连通性
+		// etcd — 用短超时的 KV Get 验证连通性（key 不存在时 Get 返回 nil error，无需特殊处理）
 		etcdTimeout, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
-		_, etcdErr := proxy.etcdClient.Get(etcdTimeout, "health-check-nonexistent-key")
-		if etcdErr != nil {
-			// 过滤掉正常的 "key not found" 错误（说明连接成功）
-			if !strings.Contains(etcdErr.Error(), "key not found") {
-				pkglog.L().Warn("readyz: etcd unhealthy", zap.Error(etcdErr))
-				checks["etcd"] = "unhealthy"
-			} else {
-				checks["etcd"] = "ok"
-			}
+		if _, etcdErr := proxy.etcdClient.Get(etcdTimeout, "health-check-nonexistent-key"); etcdErr != nil {
+			pkglog.L().Warn("readyz: etcd unhealthy", zap.Error(etcdErr))
+			checks["etcd"] = "unhealthy"
 		} else {
 			checks["etcd"] = "ok"
 		}
@@ -199,6 +193,17 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 	return mux
 }
 
+// unquoteValue 剥离配对的引号（"value" 或 'value'），不配对时返回原值
+// 注意：strings.Trim 按字符集剥离，"he'llo 会被错误剥掉两端的 " 和 '
+func unquoteValue(s string) string {
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
+}
+
 // loadDotenv 自动加载 .env 文件（配置文件目录 → 当前目录 → 上级目录），不覆盖已有环境变量
 func loadDotenv(configFile string) {
 	candidates := []string{filepath.Join(configFile, ".env"), ".env", "../.env"}
@@ -222,8 +227,7 @@ func loadDotenv(configFile string) {
 				}
 				key = strings.TrimSpace(key)
 				val = strings.TrimSpace(val)
-				// 去除引号包裹的值（兼容 KEY="value" 和 KEY='value'）
-				val = strings.Trim(val, `"'`)
+				val = unquoteValue(val)
 				if os.Getenv(key) == "" {
 					os.Setenv(key, val)
 				}

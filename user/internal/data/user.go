@@ -180,15 +180,19 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 		}
 	}
 
-	// 动态构建 SET 子句
+	// 动态构建 SET 子句（支持将字段重置为零值：通过 UpdateFields 标记）
 	var setClauses []string
 	var args []any
 
-	if user.RealName != "" {
+	forceSet := func(field string) bool {
+		return user.UpdateFields != nil && user.UpdateFields[field]
+	}
+
+	if user.RealName != "" || forceSet("real_name") {
 		setClauses = append(setClauses, "real_name = ?")
 		args = append(args, user.RealName)
 	}
-	if user.Avatar != "" {
+	if user.Avatar != "" || forceSet("avatar") {
 		setClauses = append(setClauses, "avatar = ?")
 		args = append(args, user.Avatar)
 	}
@@ -200,11 +204,11 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 		setClauses = append(setClauses, "age = ?")
 		args = append(args, user.Age)
 	}
-	if user.Email != "" {
+	if user.Email != "" || forceSet("email") {
 		setClauses = append(setClauses, "email = ?")
 		args = append(args, user.Email)
 	}
-	if user.Remark != "" {
+	if user.Remark != "" || forceSet("remark") {
 		setClauses = append(setClauses, "remark = ?")
 		args = append(args, user.Remark)
 	}
@@ -291,6 +295,21 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 			tx.Rollback()
 		}
 	}()
+
+	// [Fix] 清理同手机号/邮箱的软删除记录，避免唯一键冲突
+	// 软删除的记录不可恢复，释放手机号/邮箱供新用户注册
+	if _, err := tx.ExecContext(ctx,
+		`DELETE FROM user WHERE phone = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Phone,
+	); err != nil {
+		zap.L().Warn("register: cleanup soft-deleted phone records failed", zap.String("phone", pkgstr.MaskPhone(user.Phone)), zap.Error(err))
+	}
+	if user.Email != "" {
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM user WHERE email = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Email,
+		); err != nil {
+			zap.L().Warn("register: cleanup soft-deleted email records failed", zap.Error(err))
+		}
+	}
 
 	// 手机号唯一性检查（SELECT FOR UPDATE 锁行，防止并发）
 	var phoneCount int

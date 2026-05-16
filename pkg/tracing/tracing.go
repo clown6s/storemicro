@@ -32,6 +32,14 @@ func InitTracer(c Conf) (func(context.Context) error, error) {
 		c.SampleRate = 1.0
 	}
 
+	// Endpoint 为空时使用 no-op TracerProvider，避免 gRPC 连接空地址阻塞
+	if c.Endpoint == "" {
+		zap.L().Warn("OTLP tracer endpoint is empty, using no-op tracer")
+		tp := tracesdk.NewTracerProvider()
+		otel.SetTracerProvider(tp)
+		return tp.Shutdown, nil
+	}
+
 	// 创建 OTLP gRPC exporter
 	exp, err := otlptracegrpc.New(context.Background(),
 		otlptracegrpc.WithEndpoint(c.Endpoint),

@@ -73,19 +73,21 @@ func init() {
 }
 
 // User 领域模型（对应数据库 user 表全部字段）
+// UpdateFields 标记需要强制更新的字段（用于区分"未设置"和"设置为空值"），仅在 Update/UpdateTx 时有效
 type User struct {
-	ID         int64
-	Password   string // bcrypt 加密后的密码
-	RealName   string
-	Avatar     string
-	Gender     int32
-	Age        int32
-	Phone      string
-	Email      string
-	CreateTime string
-	UpdateTime string
-	Remark     string
-	DeletedAt  string
+	ID           int64
+	Password     string // bcrypt 加密后的密码
+	RealName     string
+	Avatar       string
+	Gender       int32
+	Age          int32
+	Phone        string
+	Email        string
+	CreateTime   string
+	UpdateTime   string
+	Remark       string
+	DeletedAt    string
+	UpdateFields map[string]bool // 需要强制更新为零值的字段名
 }
 
 // UserRepo 数据仓库接口（由 data 层实现）
@@ -284,17 +286,17 @@ func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32, phon
 	}
 
 	users, total, err := uc.repo.List(ctx, page, pageSize, phone, name)
-
-	// 记录结果到 span
-	span.SetAttributes(
-		attribute.Int64("list.total", total),
-		attribute.Int("list.result_count", len(users)),
-	)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
 		return nil, 0, err
 	}
+
+	// 记录结果到 span（仅在成功时）
+	span.SetAttributes(
+		attribute.Int64("list.total", total),
+		attribute.Int("list.result_count", len(users)),
+	)
 
 	return users, total, nil
 }
