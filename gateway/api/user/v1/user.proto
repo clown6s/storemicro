@@ -34,7 +34,7 @@ service User {
       get: "/api/v1/user/list"
     };
   }
-  // 用户登出（#21: token 从 Authorization header 获取，不再通过 body 传递）
+  // 用户登出（token 从 Authorization header 获取，不再通过 body 传递）
   rpc Logout (LogoutReq) returns (LogoutResp) {
     option (google.api.http) = {
       post: "/api/v1/user/logout"
@@ -59,11 +59,9 @@ message GetUserReq {
   int64 id = 1;
 }
 
-// #20: code/message 字段标记废弃，应改用 gRPC status codes 传递错误
-// 保留字段以兼容现有客户端，新服务端实现应使用 status.Error() 返回错误
 message GetUserResp {
-  uint32 code = 1 [deprecated = true];
-  string message = 2 [deprecated = true];
+  uint32 code = 1;
+  string message = 2;
   UserInfo data = 3;
   reserved 4 to 99;
 }
@@ -97,8 +95,8 @@ message RegisterReq {
 }
 
 message RegisterResp {
-  uint32 code = 1 [deprecated = true];
-  string message = 2 [deprecated = true];
+  uint32 code = 1;
+  string message = 2;
   reserved 3 to 99;
 }
 
@@ -110,8 +108,8 @@ message LoginReq {
 }
 
 message LoginResp {
-  uint32 code    = 1 [deprecated = true];
-  string message = 2 [deprecated = true];
+  uint32 code    = 1;
+  string message = 2;
   string token   = 3;
   UserInfo data  = 4;
   reserved 5 to 99;
@@ -131,8 +129,8 @@ message ListUsersReq {
 }
 
 message ListUsersResp {
-  uint32         code      = 1 [deprecated = true];
-  string         message   = 2 [deprecated = true];
+  uint32         code      = 1;
+  string         message   = 2;
   int64          total     = 3;
   int32          page      = 4;
   int32          page_size = 5;
@@ -140,14 +138,14 @@ message ListUsersResp {
   reserved 7 to 99;
 }
 
-// 登出（#21: token 从 Authorization header 获取，消息体无需传 token）
+// 登出（token 从 Authorization header 获取，消息体无需传 token）
 message LogoutReq {
   reserved 1 to 99;  // token 字段已移除，改从 header 获取
 }
 
 message LogoutResp {
-  uint32 code    = 1 [deprecated = true];
-  string message = 2 [deprecated = true];
+  uint32 code    = 1;
+  string message = 2;
   reserved 3 to 99;
 }
 
@@ -166,8 +164,8 @@ message UpdateUserReq {
 }
 
 message UpdateUserResp {
-  uint32 code    = 1 [deprecated = true];
-  string message = 2 [deprecated = true];
+  uint32 code    = 1;
+  string message = 2;
   reserved 3 to 99;
 }
 
@@ -178,7 +176,7 @@ message DeleteUserReq {
 }
 
 message DeleteUserResp {
-  uint32 code    = 1 [deprecated = true];
-  string message = 2 [deprecated = true];
+  uint32 code    = 1;
+  string message = 2;
   reserved 3 to 99;
 }

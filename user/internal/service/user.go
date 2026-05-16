@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 
 	userv1 "user/api/user/v1"
 	"user/internal/biz"
@@ -12,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 )
 
@@ -97,11 +99,17 @@ func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.
 	}, nil
 }
 
-// Logout 用户登出
+// Logout 用户登出（token 从 gRPC metadata Authorization header 获取）
 func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv1.LogoutResp, error) {
 	zap.L().Debug("Logout called")
 
-	if err := s.uc.Logout(ctx, req.Token); err != nil {
+	// 从 gRPC metadata 读取 Authorization header（gateway 转发）
+	token := extractTokenFromMetadata(ctx)
+	if token == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing authorization token")
+	}
+
+	if err := s.uc.Logout(ctx, token); err != nil {
 		zap.L().Warn("Logout failed", zap.Error(err))
 		return nil, s.mapError(err)
 	}
@@ -109,6 +117,24 @@ func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv
 	return &userv1.LogoutResp{
 		Message: "logged out",
 	}, nil
+}
+
+// extractTokenFromMetadata 从 gRPC metadata 提取 Bearer token
+func extractTokenFromMetadata(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	// grpc-gateway 转发 HTTP header 时 key 会转小写
+	values := md.Get("authorization")
+	if len(values) == 0 {
+		return ""
+	}
+	authHeader := values[0]
+	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+		return strings.TrimSpace(authHeader[7:])
+	}
+	return authHeader
 }
 
 // ListUsers 用户列表（分页）

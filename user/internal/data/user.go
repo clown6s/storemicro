@@ -337,9 +337,9 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 		return fmt.Errorf("cleanup soft-deleted phone records failed: %w", err)
 	}
 	if user.Email != "" {
-		// 同时匹配 phone + email，确保只清理与当前注册用户相关的软删除记录
+		// 清理所有软删除记录中同邮箱的记录（不限定手机号，防止跨手机号邮箱重用导致唯一键冲突）
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM user WHERE phone = ? AND email = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Phone, user.Email,
+			`DELETE FROM user WHERE email = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Email,
 		); err != nil {
 			return fmt.Errorf("cleanup soft-deleted email records failed: %w", err)
 		}

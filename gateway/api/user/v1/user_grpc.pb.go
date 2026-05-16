@@ -42,7 +42,7 @@ type UserClient interface {
 	Login(ctx context.Context, in *LoginReq, opts ...grpc.CallOption) (*LoginResp, error)
 	// 用户列表（分页）
 	ListUsers(ctx context.Context, in *ListUsersReq, opts ...grpc.CallOption) (*ListUsersResp, error)
-	// 用户登出（#21: token 从 Authorization header 获取，不再通过 body 传递）
+	// 用户登出（token 从 Authorization header 获取，不再通过 body 传递）
 	Logout(ctx context.Context, in *LogoutReq, opts ...grpc.CallOption) (*LogoutResp, error)
 	// 更新用户资料
 	UpdateUser(ctx context.Context, in *UpdateUserReq, opts ...grpc.CallOption) (*UpdateUserResp, error)
@@ -139,7 +139,7 @@ type UserServer interface {
 	Login(context.Context, *LoginReq) (*LoginResp, error)
 	// 用户列表（分页）
 	ListUsers(context.Context, *ListUsersReq) (*ListUsersResp, error)
-	// 用户登出（#21: token 从 Authorization header 获取，不再通过 body 传递）
+	// 用户登出（token 从 Authorization header 获取，不再通过 body 传递）
 	Logout(context.Context, *LogoutReq) (*LogoutResp, error)
 	// 更新用户资料
 	UpdateUser(context.Context, *UpdateUserReq) (*UpdateUserResp, error)

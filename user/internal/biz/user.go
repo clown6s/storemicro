@@ -87,7 +87,7 @@ func getDummyHash() []byte {
 // UpdateFields 标记需要强制更新的字段（用于区分"未设置"和"设置为空值"），仅在 Update/UpdateTx 时有效
 type User struct {
 	ID           int64
-	Password     string // bcrypt 加密后的密码
+	Password     string // bcrypt 加密后的密码，WARNING: 仅在 Login/Register 流程中赋值，返回前必须调用 ClearPassword()
 	RealName     string
 	Avatar       string
 	Gender       int32
@@ -100,6 +100,9 @@ type User struct {
 	DeletedAt    string
 	UpdateFields map[string]bool // 需要强制更新为零值的字段名
 }
+
+// ClearPassword 清除密码 hash，防止在 biz 层之外传播。所有返回 User 的代码路径都必须调用。
+func (u *User) ClearPassword() { u.Password = "" }
 
 // UserRepo 数据仓库接口（由 data 层实现）
 type UserRepo interface {
@@ -262,7 +265,7 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 	}
 
 	zap.L().Info("user logged in", zap.Int64("id", user.ID), zap.String("phone", pkgstr.MaskPhone(phone)))
-	user.Password = "" // 防御性清除：不在 biz 层之外传播密码 hash
+	user.ClearPassword() // 防御性清除：不在 biz 层之外传播密码 hash
 	return token, user, nil
 }
 
@@ -288,6 +291,11 @@ func (uc *UserUsecase) Logout(ctx context.Context, token string) error {
 
 	zap.L().Info("user logged out", zap.Int64("userID", userID))
 	return nil
+}
+
+// ListUsers sortBy 白名单（service 层防御性校验，data 层有独立校验做兜底）
+var allowedSortBy = map[string]bool{
+	"id": true, "create_time": true, "update_time": true,
 }
 
 // ListUsers 用户列表（分页）
@@ -321,6 +329,9 @@ func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32, phon
 	}
 	if name != "" && len(name) < 2 {
 		return nil, 0, ErrNameTooShort
+	}
+	if sortBy != "" && !allowedSortBy[sortBy] {
+		sortBy = "id" // 非法值回退默认
 	}
 
 	users, total, err := uc.repo.List(ctx, page, pageSize, phone, name, sortBy, sortOrder)

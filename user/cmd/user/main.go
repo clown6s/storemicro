@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"time"
 
 	stdlog "log"
@@ -281,11 +282,30 @@ func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *htt
 	metricsHandler := http.Handler(promhttp.Handler())
 	if metricsPassword := os.Getenv("METRICS_PASSWORD"); metricsPassword != "" {
 		metricsHandler = pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword)
+	} else {
+		helper.Warn("metrics: no password configured, metrics endpoint is disabled")
 	}
 	mux.Handle("/metrics", metricsHandler)
+
+	// 为整个 health mux 包裹 panic recovery（与 gateway 保持一致）
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				helper.Errorf("panic recovered in health server",
+					"error", rec,
+					"stack", string(debug.Stack()),
+				)
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"code":500,"message":"internal server error"}`))
+			}
+		}()
+		mux.ServeHTTP(w, r)
+	})
+
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 		IdleTimeout:  30 * time.Second,

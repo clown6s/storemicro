@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/go-kratos/kratos/v2/config"
@@ -87,6 +88,10 @@ func (f *envFile) loadDir(path string) (kvs []*config.KeyValue, err error) {
 	if err != nil {
 		return nil, err
 	}
+	// 显式排序保证文件加载顺序确定性（os.ReadDir 按文件名排序，但显式声明意图）
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].Name() < files[j].Name()
+	})
 	for _, file := range files {
 		if file.IsDir() || strings.HasPrefix(file.Name(), ".") {
 			continue

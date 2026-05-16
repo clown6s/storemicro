@@ -69,15 +69,11 @@ func (x *GetUserReq) GetId() int64 {
 	return 0
 }
 
-// #20: code/message 字段标记废弃，应改用 gRPC status codes 传递错误
-// 保留字段以兼容现有客户端，新服务端实现应使用 status.Error() 返回错误
 type GetUserResp struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Code uint32 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Message       string    `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Data          *UserInfo `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          uint32                 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Data          *UserInfo              `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -112,7 +108,6 @@ func (*GetUserResp) Descriptor() ([]byte, []int) {
 	return file_user_proto_rawDescGZIP(), []int{1}
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *GetUserResp) GetCode() uint32 {
 	if x != nil {
 		return x.Code
@@ -120,7 +115,6 @@ func (x *GetUserResp) GetCode() uint32 {
 	return 0
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *GetUserResp) GetMessage() string {
 	if x != nil {
 		return x.Message
@@ -354,11 +348,9 @@ func (x *RegisterReq) GetRemark() string {
 }
 
 type RegisterResp struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Code uint32 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          uint32                 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -393,7 +385,6 @@ func (*RegisterResp) Descriptor() ([]byte, []int) {
 	return file_user_proto_rawDescGZIP(), []int{4}
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *RegisterResp) GetCode() uint32 {
 	if x != nil {
 		return x.Code
@@ -401,7 +392,6 @@ func (x *RegisterResp) GetCode() uint32 {
 	return 0
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *RegisterResp) GetMessage() string {
 	if x != nil {
 		return x.Message
@@ -463,13 +453,11 @@ func (x *LoginReq) GetPassword() string {
 }
 
 type LoginResp struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Code uint32 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Message       string    `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Token         string    `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
-	Data          *UserInfo `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          uint32                 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Token         string                 `protobuf:"bytes,3,opt,name=token,proto3" json:"token,omitempty"`
+	Data          *UserInfo              `protobuf:"bytes,4,opt,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -504,7 +492,6 @@ func (*LoginResp) Descriptor() ([]byte, []int) {
 	return file_user_proto_rawDescGZIP(), []int{6}
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *LoginResp) GetCode() uint32 {
 	if x != nil {
 		return x.Code
@@ -512,7 +499,6 @@ func (x *LoginResp) GetCode() uint32 {
 	return 0
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *LoginResp) GetMessage() string {
 	if x != nil {
 		return x.Message
@@ -622,15 +608,13 @@ func (x *ListUsersReq) GetSortOrder() string {
 }
 
 type ListUsersResp struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Code uint32 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Message       string      `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Total         int64       `protobuf:"varint,3,opt,name=total,proto3" json:"total,omitempty"`
-	Page          int32       `protobuf:"varint,4,opt,name=page,proto3" json:"page,omitempty"`
-	PageSize      int32       `protobuf:"varint,5,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	Data          []*UserInfo `protobuf:"bytes,6,rep,name=data,proto3" json:"data,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          uint32                 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	Total         int64                  `protobuf:"varint,3,opt,name=total,proto3" json:"total,omitempty"`
+	Page          int32                  `protobuf:"varint,4,opt,name=page,proto3" json:"page,omitempty"`
+	PageSize      int32                  `protobuf:"varint,5,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
+	Data          []*UserInfo            `protobuf:"bytes,6,rep,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -665,7 +649,6 @@ func (*ListUsersResp) Descriptor() ([]byte, []int) {
 	return file_user_proto_rawDescGZIP(), []int{8}
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *ListUsersResp) GetCode() uint32 {
 	if x != nil {
 		return x.Code
@@ -673,7 +656,6 @@ func (x *ListUsersResp) GetCode() uint32 {
 	return 0
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *ListUsersResp) GetMessage() string {
 	if x != nil {
 		return x.Message
@@ -709,7 +691,7 @@ func (x *ListUsersResp) GetData() []*UserInfo {
 	return nil
 }
 
-// 登出（#21: token 从 Authorization header 获取，消息体无需传 token）
+// 登出（token 从 Authorization header 获取，消息体无需传 token）
 type LogoutReq struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -747,11 +729,9 @@ func (*LogoutReq) Descriptor() ([]byte, []int) {
 }
 
 type LogoutResp struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Code uint32 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          uint32                 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -786,7 +766,6 @@ func (*LogoutResp) Descriptor() ([]byte, []int) {
 	return file_user_proto_rawDescGZIP(), []int{10}
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *LogoutResp) GetCode() uint32 {
 	if x != nil {
 		return x.Code
@@ -794,7 +773,6 @@ func (x *LogoutResp) GetCode() uint32 {
 	return 0
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *LogoutResp) GetMessage() string {
 	if x != nil {
 		return x.Message
@@ -905,11 +883,9 @@ func (x *UpdateUserReq) GetForceClearFields() []string {
 }
 
 type UpdateUserResp struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Code uint32 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          uint32                 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -944,7 +920,6 @@ func (*UpdateUserResp) Descriptor() ([]byte, []int) {
 	return file_user_proto_rawDescGZIP(), []int{12}
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *UpdateUserResp) GetCode() uint32 {
 	if x != nil {
 		return x.Code
@@ -952,7 +927,6 @@ func (x *UpdateUserResp) GetCode() uint32 {
 	return 0
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *UpdateUserResp) GetMessage() string {
 	if x != nil {
 		return x.Message
@@ -1006,11 +980,9 @@ func (x *DeleteUserReq) GetId() int64 {
 }
 
 type DeleteUserResp struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Code uint32 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	// Deprecated: Marked as deprecated in user.proto.
-	Message       string `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Code          uint32                 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1045,7 +1017,6 @@ func (*DeleteUserResp) Descriptor() ([]byte, []int) {
 	return file_user_proto_rawDescGZIP(), []int{14}
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *DeleteUserResp) GetCode() uint32 {
 	if x != nil {
 		return x.Code
@@ -1053,7 +1024,6 @@ func (x *DeleteUserResp) GetCode() uint32 {
 	return 0
 }
 
-// Deprecated: Marked as deprecated in user.proto.
 func (x *DeleteUserResp) GetMessage() string {
 	if x != nil {
 		return x.Message
@@ -1069,10 +1039,10 @@ const file_user_proto_rawDesc = "" +
 	"user.proto\x12\vapi.user.v1\x1a\x1cgoogle/api/annotations.proto\"\x1c\n" +
 	"\n" +
 	"GetUserReq\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\x03R\x02id\"t\n" +
-	"\vGetUserResp\x12\x16\n" +
-	"\x04code\x18\x01 \x01(\rB\x02\x18\x01R\x04code\x12\x1c\n" +
-	"\amessage\x18\x02 \x01(\tB\x02\x18\x01R\amessage\x12)\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02id\"l\n" +
+	"\vGetUserResp\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\rR\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12)\n" +
 	"\x04data\x18\x03 \x01(\v2\x15.api.user.v1.UserInfoR\x04dataJ\x04\b\x04\x10d\"\x85\x02\n" +
 	"\bUserInfo\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x14\n" +
@@ -1096,16 +1066,16 @@ const file_user_proto_rawDesc = "" +
 	"\x06avatar\x18\x05 \x01(\tR\x06avatar\x12\x16\n" +
 	"\x06gender\x18\x06 \x01(\x05R\x06gender\x12\x10\n" +
 	"\x03age\x18\a \x01(\x05R\x03age\x12\x16\n" +
-	"\x06remark\x18\b \x01(\tR\x06remarkJ\x04\b\t\x10d\"J\n" +
-	"\fRegisterResp\x12\x16\n" +
-	"\x04code\x18\x01 \x01(\rB\x02\x18\x01R\x04code\x12\x1c\n" +
-	"\amessage\x18\x02 \x01(\tB\x02\x18\x01R\amessageJ\x04\b\x03\x10d\"B\n" +
+	"\x06remark\x18\b \x01(\tR\x06remarkJ\x04\b\t\x10d\"B\n" +
+	"\fRegisterResp\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\rR\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessageJ\x04\b\x03\x10d\"B\n" +
 	"\bLoginReq\x12\x14\n" +
 	"\x05phone\x18\x01 \x01(\tR\x05phone\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpasswordJ\x04\b\x03\x10d\"\x88\x01\n" +
-	"\tLoginResp\x12\x16\n" +
-	"\x04code\x18\x01 \x01(\rB\x02\x18\x01R\x04code\x12\x1c\n" +
-	"\amessage\x18\x02 \x01(\tB\x02\x18\x01R\amessage\x12\x14\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpasswordJ\x04\b\x03\x10d\"\x80\x01\n" +
+	"\tLoginResp\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\rR\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x14\n" +
 	"\x05token\x18\x03 \x01(\tR\x05token\x12)\n" +
 	"\x04data\x18\x04 \x01(\v2\x15.api.user.v1.UserInfoR\x04dataJ\x04\b\x05\x10d\"\xa7\x01\n" +
 	"\fListUsersReq\x12\x12\n" +
@@ -1115,19 +1085,19 @@ const file_user_proto_rawDesc = "" +
 	"\x04name\x18\x04 \x01(\tR\x04name\x12\x17\n" +
 	"\asort_by\x18\x05 \x01(\tR\x06sortBy\x12\x1d\n" +
 	"\n" +
-	"sort_order\x18\x06 \x01(\tR\tsortOrderJ\x04\b\a\x10d\"\xbd\x01\n" +
-	"\rListUsersResp\x12\x16\n" +
-	"\x04code\x18\x01 \x01(\rB\x02\x18\x01R\x04code\x12\x1c\n" +
-	"\amessage\x18\x02 \x01(\tB\x02\x18\x01R\amessage\x12\x14\n" +
+	"sort_order\x18\x06 \x01(\tR\tsortOrderJ\x04\b\a\x10d\"\xb5\x01\n" +
+	"\rListUsersResp\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\rR\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\x12\x14\n" +
 	"\x05total\x18\x03 \x01(\x03R\x05total\x12\x12\n" +
 	"\x04page\x18\x04 \x01(\x05R\x04page\x12\x1b\n" +
 	"\tpage_size\x18\x05 \x01(\x05R\bpageSize\x12)\n" +
 	"\x04data\x18\x06 \x03(\v2\x15.api.user.v1.UserInfoR\x04dataJ\x04\b\a\x10d\"\x11\n" +
-	"\tLogoutReqJ\x04\b\x01\x10d\"H\n" +
+	"\tLogoutReqJ\x04\b\x01\x10d\"@\n" +
 	"\n" +
-	"LogoutResp\x12\x16\n" +
-	"\x04code\x18\x01 \x01(\rB\x02\x18\x01R\x04code\x12\x1c\n" +
-	"\amessage\x18\x02 \x01(\tB\x02\x18\x01R\amessageJ\x04\b\x03\x10d\"\xe0\x01\n" +
+	"LogoutResp\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\rR\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessageJ\x04\b\x03\x10d\"\xe0\x01\n" +
 	"\rUpdateUserReq\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\x14\n" +
 	"\x05email\x18\x02 \x01(\tR\x05email\x12\x1b\n" +
@@ -1136,15 +1106,15 @@ const file_user_proto_rawDesc = "" +
 	"\x06gender\x18\x05 \x01(\x05R\x06gender\x12\x10\n" +
 	"\x03age\x18\x06 \x01(\x05R\x03age\x12\x16\n" +
 	"\x06remark\x18\a \x01(\tR\x06remark\x12,\n" +
-	"\x12force_clear_fields\x18\b \x03(\tR\x10forceClearFieldsJ\x04\b\t\x10d\"L\n" +
-	"\x0eUpdateUserResp\x12\x16\n" +
-	"\x04code\x18\x01 \x01(\rB\x02\x18\x01R\x04code\x12\x1c\n" +
-	"\amessage\x18\x02 \x01(\tB\x02\x18\x01R\amessageJ\x04\b\x03\x10d\"%\n" +
+	"\x12force_clear_fields\x18\b \x03(\tR\x10forceClearFieldsJ\x04\b\t\x10d\"D\n" +
+	"\x0eUpdateUserResp\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\rR\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessageJ\x04\b\x03\x10d\"%\n" +
 	"\rDeleteUserReq\x12\x0e\n" +
-	"\x02id\x18\x01 \x01(\x03R\x02idJ\x04\b\x02\x10d\"L\n" +
-	"\x0eDeleteUserResp\x12\x16\n" +
-	"\x04code\x18\x01 \x01(\rB\x02\x18\x01R\x04code\x12\x1c\n" +
-	"\amessage\x18\x02 \x01(\tB\x02\x18\x01R\amessageJ\x04\b\x03\x10d2\x97\x05\n" +
+	"\x02id\x18\x01 \x01(\x03R\x02idJ\x04\b\x02\x10d\"D\n" +
+	"\x0eDeleteUserResp\x12\x12\n" +
+	"\x04code\x18\x01 \x01(\rR\x04code\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessageJ\x04\b\x03\x10d2\x97\x05\n" +
 	"\x04User\x12W\n" +
 	"\aGetUser\x12\x17.api.user.v1.GetUserReq\x1a\x18.api.user.v1.GetUserResp\"\x19\x82\xd3\xe4\x93\x02\x13\x12\x11/api/v1/user/{id}\x12a\n" +
 	"\bRegister\x12\x18.api.user.v1.RegisterReq\x1a\x19.api.user.v1.RegisterResp\" \x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/api/v1/user/register\x12U\n" +

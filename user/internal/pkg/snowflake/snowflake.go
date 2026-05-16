@@ -3,6 +3,8 @@ package snowflake
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -46,61 +48,103 @@ func Shutdown() {
 }
 
 // InitWithEtcd 通过 etcd 自动分配唯一的 node_id
-// 启动时从 0 遍历到 1023，尝试抢锁，抢到第一个可用的即作为本实例的 node_id
-// 同时启动后台协程续约租约，保证实例存活期间 node_id 不会被其他实例抢占
+// 先批量 GET 已占用的节点，再在空闲节点中顺序尝试抢锁，避免逐个 Grant+Revoke 浪费
 func InitWithEtcd(etcdClient *clientv3.Client, serviceName string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	for i := 0; i <= maxNodeID; i++ {
-		key := fmt.Sprintf("%s%s/%d", keyPrefix, serviceName, i)
+	// 批量获取已占用的节点 key，确定空闲节点列表
+	keyPrefix := fmt.Sprintf("%s%s/", keyPrefix, serviceName)
+	getResp, err := etcdClient.Get(ctx, keyPrefix, clientv3.WithPrefix())
+	if err != nil {
+		return fmt.Errorf("snowflake: get existing nodes failed: %w", err)
+	}
 
-		// 创建租约
-		lease, err := etcdClient.Grant(ctx, leaseTTL)
-		if err != nil {
-			return fmt.Errorf("snowflake: create lease failed: %w", err)
-		}
-
-		// 尝试写入（NX = 不存在才写入），抢锁
-		txn := etcdClient.Txn(ctx).
-			If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
-			Then(clientv3.OpPut(key, "1", clientv3.WithLease(lease.ID)))
-
-		resp, err := txn.Commit()
-		if err != nil {
-			return fmt.Errorf("snowflake: txn commit failed: %w", err)
-		}
-
-		if resp.Succeeded {
-			// 抢到了，初始化 snowflake node
-			var sfNode *sf.Node
-			sfNode, err = sf.NewNode(int64(i))
-			if err != nil {
-				// [L1] 抢到但初始化失败，释放 lease
-				_, _ = etcdClient.Revoke(ctx, lease.ID)
-				return fmt.Errorf("snowflake: create node failed: %w", err)
+	occupied := make(map[int]bool, len(getResp.Kvs))
+	for _, kv := range getResp.Kvs {
+		// key 格式: /snowflake/nodes/{service}/{nodeId}
+		parts := strings.Split(string(kv.Key), "/")
+		if len(parts) > 0 {
+			if nodeID, err := strconv.Atoi(parts[len(parts)-1]); err == nil && nodeID >= 0 && nodeID <= maxNodeID {
+				occupied[nodeID] = true
 			}
-			readyMu.Lock()
-			node = sfNode
-			NodeID = int64(i)
-			nodeReady = true
-			readyMu.Unlock()
+		}
+	}
 
-			// 后台续约
-			go keepAlive(etcdClient, lease.ID, key)
-
-			zap.L().Info("snowflake: allocated node_id",
-				zap.Int("node_id", i),
-				zap.String("service", serviceName),
-			)
+	// 优先尝试空闲节点
+	for i := 0; i <= maxNodeID; i++ {
+		if occupied[i] {
+			continue
+		}
+		acquired, _, err := tryAcquireNode(ctx, etcdClient, serviceName, i)
+		if err != nil {
+			return err
+		}
+		if acquired {
 			return nil
 		}
+	}
 
-		// [L1] 没抢到，释放不再需要的 lease
-		_, _ = etcdClient.Revoke(ctx, lease.ID)
+	// 所有标记为空闲的节点都抢锁失败（竞态），退回到全量扫描兜底
+	zap.L().Warn("snowflake: all presumed-free nodes occupied by race, falling back to full scan")
+	for i := 0; i <= maxNodeID; i++ {
+		acquired, _, err := tryAcquireNode(ctx, etcdClient, serviceName, i)
+		if err != nil {
+			return err
+		}
+		if acquired {
+			return nil
+		}
 	}
 
 	return fmt.Errorf("snowflake: no available node_id (all 0-%d are occupied)", maxNodeID)
+}
+
+// tryAcquireNode 尝试为指定 node_id 抢锁（创建 lease + 事务写入）
+// 返回 (是否成功, leaseID, error)
+func tryAcquireNode(ctx context.Context, etcdClient *clientv3.Client, serviceName string, nodeID int) (bool, clientv3.LeaseID, error) {
+	key := fmt.Sprintf("%s%s/%d", keyPrefix, serviceName, nodeID)
+
+	lease, err := etcdClient.Grant(ctx, leaseTTL)
+	if err != nil {
+		return false, 0, fmt.Errorf("snowflake: create lease failed: %w", err)
+	}
+
+	txn := etcdClient.Txn(ctx).
+		If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
+		Then(clientv3.OpPut(key, "1", clientv3.WithLease(lease.ID)))
+
+	resp, err := txn.Commit()
+	if err != nil {
+		_, _ = etcdClient.Revoke(ctx, lease.ID)
+		return false, 0, fmt.Errorf("snowflake: txn commit failed: %w", err)
+	}
+
+	if resp.Succeeded {
+		var sfNode *sf.Node
+		sfNode, err = sf.NewNode(int64(nodeID))
+		if err != nil {
+			_, _ = etcdClient.Revoke(ctx, lease.ID)
+			return false, 0, fmt.Errorf("snowflake: create node failed: %w", err)
+		}
+		readyMu.Lock()
+		node = sfNode
+		NodeID = int64(nodeID)
+		nodeReady = true
+		readyMu.Unlock()
+
+		go keepAlive(etcdClient, lease.ID, key)
+
+		zap.L().Info("snowflake: allocated node_id",
+			zap.Int("node_id", nodeID),
+			zap.String("service", serviceName),
+		)
+		return true, lease.ID, nil
+	}
+
+	// 没抢到，释放不再需要的 lease
+	_, _ = etcdClient.Revoke(ctx, lease.ID)
+	return false, 0, nil
 }
 
 // keepAlive 后台续约租约，实例退出或崩溃时租约自动过期，node_id 被释放
