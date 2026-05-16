@@ -3,11 +3,13 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
+	"runtime/debug"
 	"time"
 
 	"district/internal/conf"
@@ -264,16 +266,32 @@ func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *htt
 		metricsHandler = pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword)
 	}
 	mux.Handle("/metrics", metricsHandler)
+	// 为整个 health mux 包裹 panic recovery（与 user/gateway 保持一致）
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				helper.Errorf("panic recovered in health server",
+					"error", rec,
+					"stack", string(debug.Stack()),
+				)
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"code":500,"message":"internal server error"}`))
+			}
+		}()
+		mux.ServeHTTP(w, r)
+	})
 	srv := &http.Server{
-		Addr:         addr,
-		Handler:      mux,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 5 * time.Second,
-		IdleTimeout:  30 * time.Second,
+		Addr:              addr,
+		Handler:           handler,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      5 * time.Second,
+		IdleTimeout:       30 * time.Second,
 	}
 	helper.Infow("msg", "health server starting", "addr", addr)
 	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			helper.Errorf("health server error: %v", err)
 		}
 	}()

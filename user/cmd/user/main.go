@@ -311,11 +311,12 @@ func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *htt
 	})
 
 	srv := &http.Server{
-		Addr:         addr,
-		Handler:      handler,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 5 * time.Second,
-		IdleTimeout:  30 * time.Second,
+		Addr:              addr,
+		Handler:           handler,
+		ReadTimeout:       5 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      5 * time.Second,
+		IdleTimeout:       30 * time.Second,
 	}
 	helper.Infow("msg", "health server starting", "addr", addr)
 	go func() {

@@ -155,8 +155,8 @@ message UpdateUserReq {
   string email     = 2;
   string real_name = 3;
   string avatar    = 4;
-  int32  gender    = 5;
-  int32  age       = 6;
+  optional int32  gender    = 5;
+  optional int32  age       = 6;
   string remark    = 7;
   // 标记需要强制清空的字段名（如 "email","remark"），不填则空值不更新
   repeated string force_clear_fields = 8;

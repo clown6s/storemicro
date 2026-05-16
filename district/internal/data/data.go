@@ -38,6 +38,10 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 	if c.Database.MaxIdleConns > 0 {
 		pool.MaxIdleConns = int(c.Database.MaxIdleConns)
 	}
+	// MaxIdleConns 不能超过 MaxOpenConns（Go sql.DB 内部会 cap，显式校验防止配置误导运维）
+	if pool.MaxIdleConns > pool.MaxOpenConns && pool.MaxOpenConns > 0 {
+		pool.MaxIdleConns = pool.MaxOpenConns
+	}
 	if c.Database.ConnMaxLifetime > 0 {
 		pool.ConnMaxLifetime = int(c.Database.ConnMaxLifetime)
 	}

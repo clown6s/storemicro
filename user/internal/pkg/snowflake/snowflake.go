@@ -154,8 +154,15 @@ func keepAlive(etcdClient *clientv3.Client, leaseID clientv3.LeaseID, key string
 
 	ch, err := etcdClient.KeepAlive(ctx, leaseID)
 	if err != nil {
-		zap.L().Error("snowflake: keep-alive failed", zap.Error(err))
-		return
+		zap.L().Error("snowflake: keep-alive failed, disabling GenID until lease is re-acquired", zap.Error(err))
+		readyMu.Lock()
+		nodeReady = false
+		readyMu.Unlock()
+		// 尝试在同一 goroutine 中重新抢锁，避免 ID 碰撞
+		if retryKeepAliveOnce(etcdClient, key) {
+			return // 成功重新获取 lease
+		}
+		return // 重试失败
 	}
 
 	for {

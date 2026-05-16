@@ -2,10 +2,10 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v7.34.1
-// source: user/api/user/v1/user.proto
+// source: gateway/api/user/v1/user.proto
 
 // v1 — 用户服务 API（稳定版）
-// WARNING: 此文件与 gateway/api/user/v1/user.proto 保持同步，修改时需同步更新两处
+// WARNING: 此文件与 user/api/user/v1/user.proto 保持同步，修改时需同步更新两处
 
 package userv1
 
@@ -360,5 +360,5 @@ var User_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "user/api/user/v1/user.proto",
+	Metadata: "gateway/api/user/v1/user.proto",
 }

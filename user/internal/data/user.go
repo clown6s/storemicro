@@ -245,7 +245,7 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 
 	if len(setClauses) == 0 {
 		zap.L().Debug("userRepo.UpdateTx: no fields to update", zap.Int64("id", user.ID))
-		return nil
+		return biz.ErrNothingToUpdate
 	}
 
 	args = append(args, user.ID)
