@@ -4,25 +4,30 @@ package conf;
 
 option go_package = "user/internal/conf;conf";
 
-import "google/protobuf/duration.proto";message Bootstrap {
+import "google/protobuf/duration.proto";
+
+message Bootstrap {
   Server    server    = 1;
   Data      data      = 2;
   Logger    logger    = 3;
   Registry  registry  = 4;
-  Jwt       jwt       = 5;
-  Redis     redis     = 6;
-  Tracing   tracing   = 7;
+  Tracing   tracing   = 5;
+  Jwt       jwt       = 6;
+  Redis     redis     = 7;
+  reserved 8 to 99;
 }
 
 message Tracing {
   string endpoint   = 1;  // OTLP gRPC 端点，如 10.211.55.5:4317
   double sample_rate = 2;  // 采样率 0.0-1.0，默认 0.1
+  reserved 3 to 99;
 }
 
 message Server {
   message GRPC {
     string                addr = 1;
     google.protobuf.Duration timeout = 2;
+    reserved 3 to 99;
   }
   GRPC grpc = 1;
 }
@@ -34,18 +39,22 @@ message Data {
     int64   max_open_conns  = 3;  // 最大打开连接数，默认 100
     int64   max_idle_conns  = 4;  // 最大空闲连接数，默认 25
     int64   conn_max_lifetime = 5; // 连接最大存活时间（秒），默认 3600
+    int64   conn_max_idle_time = 6; // 空闲连接最大存活时间（秒），默认 conn_max_lifetime/2
+    reserved 7 to 99;
   }
   Database database = 1;
 }
 
 message Logger {
   string level = 1;
+  reserved 2 to 99;
 }
 
 message Registry {
   message Etcd {
     repeated string endpoints = 1;
     int64     timeout    = 2;
+    reserved 3 to 99;
   }
   Etcd etcd = 1;
 }
@@ -54,6 +63,7 @@ message Registry {
 message Jwt {
   string secret     = 1;  // 签名密钥
   int64  expire_hours = 2;  // token 有效期（小时）
+  reserved 3 to 99;
 }
 
 // Redis 配置
@@ -61,4 +71,5 @@ message Redis {
   string addr     = 1;  // redis 地址，如 10.211.55.5:6379
   string password = 2;  // redis 密码
   int32  db       = 3;  // redis DB 号
+  reserved 4 to 99;
 }

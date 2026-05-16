@@ -42,25 +42,23 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 		if req.AdCode == "" {
 			// 全量查询结果为空，返回 OK + 空数组
 			return &districtv1.GetProvinceTreeResp{
-				Code:    200,
 				Message: "success",
 				Data:    []*districtv1.DistrictTree{},
 			}, nil
 		}
-		return nil, status.Errorf(codes.NotFound, "district not found: %s", req.AdCode)
+		return nil, status.Error(codes.NotFound, "district not found")
 	}
 
-	tree := BuildDistrictTree(districts)
+	tree := buildDistrictTree(districts)
 	return &districtv1.GetProvinceTreeResp{
-		Code:    200,
 		Message: "success",
 		Data:    tree,
 	}, nil
 }
 
-// BuildDistrictTree 将平铺的行政区列表构建为树结构
+// buildDistrictTree 将平铺的行政区列表构建为树结构
 // 根节点判断：父 adCode 为 "100000" 或父节点不在结果集中
-func BuildDistrictTree(districts []*biz.District) []*districtv1.DistrictTree {
+func buildDistrictTree(districts []*biz.District) []*districtv1.DistrictTree {
 	nodeMap := make(map[string]*districtv1.DistrictTree, len(districts))
 
 	// 1. 创建所有节点

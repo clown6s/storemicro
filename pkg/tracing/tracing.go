@@ -3,12 +3,13 @@ package tracing
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
 	"go.opentelemetry.io/otel/sdk/resource"
 	tracesdk "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.26.0"
 	"go.uber.org/zap"
 )
 
@@ -40,8 +41,10 @@ func InitTracer(c Conf) (func(context.Context) error, error) {
 		return tp.Shutdown, nil
 	}
 
-	// 创建 OTLP gRPC exporter
-	exp, err := otlptracegrpc.New(context.Background(),
+	// 创建 OTLP gRPC exporter（10秒连接超时）
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	exp, err := otlptracegrpc.New(ctx,
 		otlptracegrpc.WithEndpoint(c.Endpoint),
 		otlptracegrpc.WithInsecure(),
 	)

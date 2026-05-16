@@ -85,6 +85,9 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, 
 	if pageSize > 100 {
 		pageSize = 100
 	}
+	if page > 10000 {
+		page = 10000
+	}
 
 	// 动态拼接 WHERE 条件
 	var conditions []string
@@ -207,8 +210,13 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 	var setClauses []string
 	var args []any
 
+	// forceSet 白名单：只允许客户端强制清空以下字段，防止未来新增字段时遗漏
+	allowedForceFields := map[string]bool{
+		"real_name": true, "avatar": true, "gender": true,
+		"age": true, "email": true, "remark": true,
+	}
 	forceSet := func(field string) bool {
-		return user.UpdateFields != nil && user.UpdateFields[field]
+		return user.UpdateFields != nil && user.UpdateFields[field] && allowedForceFields[field]
 	}
 
 	if user.RealName != "" || forceSet("real_name") {
@@ -263,7 +271,10 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 		return fmt.Errorf("update user failed: %w", err)
 	}
 
-	affected, _ := result.RowsAffected()
+	affected, raErr := result.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("get rows affected failed: %w", raErr)
+	}
 	if affected == 0 {
 		return biz.ErrUserNotFound
 	}
@@ -289,7 +300,10 @@ func (r *userRepo) Delete(ctx context.Context, id int64) error {
 		return fmt.Errorf("delete user failed: %w", err)
 	}
 
-	affected, _ := result.RowsAffected()
+	affected, raErr := result.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("get rows affected failed: %w", raErr)
+	}
 	if affected == 0 {
 		// 软删除幂等：用户可能已被删除，不再报 ErrUserNotFound（防止用户 ID 枚举）
 		zap.L().Debug("userRepo.Delete: no rows affected (already deleted)", zap.Int64("id", id))
@@ -329,8 +343,9 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 		return fmt.Errorf("cleanup soft-deleted phone records failed: %w", err)
 	}
 	if user.Email != "" {
+		// 同时匹配 phone + email，确保只清理与当前注册用户相关的软删除记录
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM user WHERE email = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Email,
+			`DELETE FROM user WHERE phone = ? AND email = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Phone, user.Email,
 		); err != nil {
 			return fmt.Errorf("cleanup soft-deleted email records failed: %w", err)
 		}

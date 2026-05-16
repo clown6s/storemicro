@@ -90,26 +90,29 @@ func IsAllowedOrigin(origin string, allowed map[string]struct{}) bool {
 	}
 
 	// 通配符子域名匹配 (*.example.com)
-	// 校验域名边界：确保 origin 的域名部分以 "." + baseDomain 结尾，防止 notevil.com 匹配 evil.com
+	// 使用 url.Parse 提取 scheme + host，正确处理端口号和协议匹配
+	originURL, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	originHost := originURL.Hostname() // 去掉端口
+	originScheme := originURL.Scheme
+
 	for a := range allowed {
-		if strings.HasPrefix(a, "https://") {
-			domain := strings.TrimPrefix(a, "https://")
-			if strings.HasPrefix(domain, "*.") {
-				baseDomain := domain[2:]
-				// 精确匹配 baseDomain 本身，或子域名以 .baseDomain 结尾
-				if origin == "https://"+baseDomain || strings.HasSuffix(origin, "."+baseDomain) {
-					return true
-				}
-			}
+		aURL, err := url.Parse(a)
+		if err != nil {
+			continue
 		}
-		if strings.HasPrefix(a, "http://") {
-			domain := strings.TrimPrefix(a, "http://")
-			if strings.HasPrefix(domain, "*.") {
-				baseDomain := domain[2:]
-				if origin == "http://"+baseDomain || strings.HasSuffix(origin, "."+baseDomain) {
-					return true
-				}
-			}
+		if aURL.Scheme != originScheme {
+			continue // 跨协议不允许匹配
+		}
+		domain := aURL.Hostname()
+		if !strings.HasPrefix(domain, "*.") {
+			continue
+		}
+		baseDomain := domain[2:]
+		if originHost == baseDomain || strings.HasSuffix(originHost, "."+baseDomain) {
+			return true
 		}
 	}
 	return false
@@ -238,7 +241,7 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		}
 
 		token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
-			if token.Method != jwt.SigningMethodHS256 {
+			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}
 			return []byte(secret), nil
@@ -262,7 +265,7 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		redisCtx, redisCancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer redisCancel()
 
-		val, err := rdb.Get(redisCtx, "storemicro:token:"+tokenStr).Result()
+		val, err := rdb.Get(redisCtx, "storemicro:user:token:"+tokenStr).Result()
 		if err == redis.Nil {
 			pkglog.L().Warn("jwt auth failed: token revoked (logged in elsewhere)",
 				zap.String("path", cleaned),

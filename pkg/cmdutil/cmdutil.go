@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -21,6 +22,9 @@ func UnquoteValue(s string) string {
 }
 
 // LoadDotenv 自动加载 .env 文件（配置目录 → 当前目录 → 上级目录），不覆盖已有环境变量
+// 仅加载合法的环境变量名（字母/数字/下划线），防止 .env 被篡改后设置 PATH 等系统变量
+var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
 func LoadDotenv(configFile string) {
 	candidates := []string{filepath.Join(configFile, ".env"), ".env", "../.env"}
 	if configFile != "" {
@@ -42,6 +46,9 @@ func LoadDotenv(configFile string) {
 					continue
 				}
 				key = strings.TrimSpace(key)
+				if !envKeyPattern.MatchString(key) {
+					continue // 跳过非法环境变量名
+				}
 				val = strings.TrimSpace(val)
 				val = UnquoteValue(val)
 				if os.Getenv(key) == "" {

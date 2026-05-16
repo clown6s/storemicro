@@ -60,8 +60,8 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 		PoolSize:     20,
 		MinIdleConns: 5,
 		DialTimeout:  3 * time.Second,
-		ReadTimeout:  2 * time.Second,
-		WriteTimeout: 2 * time.Second,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
 		MaxRetries:   3,
 	})
 
@@ -77,9 +77,11 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 	p.rdb = rdb
 	pkglog.L().Info("redis connected", zap.String("addr", cfg.Redis.Addr))
 
-	// 创建 etcd client（用于服务发现，带重试）
+	// 创建 etcd client（用于服务发现，带重试，60s 整体超时）
 	var etcdClient *clientv3.Client
-	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "etcd",
+	etcdCtx, etcdCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer etcdCancel()
+	if err := pkgretry.Do(etcdCtx, pkgretry.DefaultConfig(), "etcd",
 		func(rCtx context.Context) error {
 			if etcdClient != nil {
 				etcdClient.Close()
@@ -132,7 +134,9 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 		runtime.WithErrorHandler(runtime.DefaultHTTPErrorHandler),
 	)
 
-	ctx := context.Background()
+	// RegisterHandler 使用带超时的 context，防止启动时卡死
+	regCtx, regCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer regCancel()
 
 	for _, svc := range services {
 		conn, err := grpc.NewClient("discovery:///"+svc.Name, dialOpts...)
@@ -142,7 +146,7 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 		}
 		p.conns = append(p.conns, conn)
 
-		if err := svc.RegisterHandler(ctx, p.mux, conn); err != nil {
+		if err := svc.RegisterHandler(regCtx, p.mux, conn); err != nil {
 			p.Close()
 			return nil, fmt.Errorf("failed to register %s handler: %w", svc.Name, err)
 		}

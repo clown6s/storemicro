@@ -160,6 +160,7 @@ message UpdateUserReq {
   int32  gender   = 5;
   int32  age      = 6;
   string remark   = 7;
+  // 标记需要强制清空的字段名（如 "email","remark"），不填则空值不更新
   repeated string forceClearFields = 8;
   reserved 9 to 99;
 }

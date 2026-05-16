@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"regexp"
 	"time"
 
+	pkgenv "github.com/storemicro/pkg/envexpand"
 	"gopkg.in/yaml.v3"
 )
 
@@ -19,7 +19,7 @@ type AppConfig struct {
 	Etcd            EtcdConfig       `yaml:"etcd"`
 	Jwt             JwtConfig        `yaml:"jwt"`
 	Redis           RedisConfig      `yaml:"redis"`
-	Log             LogConfig        `yaml:"log"`
+	Log             LogConfig        `yaml:"logger"`
 	Tracing         TracingConfig    `yaml:"tracing"`
 	MetricsPassword string           `yaml:"metrics_password"`
 }
@@ -67,9 +67,12 @@ type TracingConfig struct {
 
 // ServerConfig 服务配置
 type ServerConfig struct {
-	Addr           string   `yaml:"addr"`
-	AllowOrigins   []string `yaml:"allow_origins"`
-	TrustedProxies []string `yaml:"trusted_proxies"`
+	Addr           string        `yaml:"addr"`
+	AllowOrigins   []string      `yaml:"allow_origins"`
+	TrustedProxies []string      `yaml:"trusted_proxies"`
+	ReadTimeout    time.Duration `yaml:"read_timeout"`  // HTTP 读超时，默认 30s
+	WriteTimeout   time.Duration `yaml:"write_timeout"` // HTTP 写超时，默认 60s
+	IdleTimeout    time.Duration `yaml:"idle_timeout"`  // HTTP 空闲超时，默认 120s
 }
 
 // EtcdConfig etcd 配置
@@ -105,7 +108,10 @@ type RedisConfig struct {
 func DefaultAppConfig() *AppConfig {
 	return &AppConfig{
 		Server: ServerConfig{
-			Addr: ":8080",
+			Addr:         ":8080",
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 60 * time.Second,
+			IdleTimeout:  120 * time.Second,
 		},
 		GrpcClient: GrpcClientConfig{
 			LoadBalancingPolicy: "round_robin",
@@ -143,33 +149,6 @@ func DefaultAppConfig() *AppConfig {
 	}
 }
 
-// ExpandEnv 支持 ${VAR:default} 和 ${VAR} / $VAR 语法
-// 使用单次正则匹配处理所有格式，避免 os.ExpandEnv 双重展开导致密码含 $ 时被截断
-var EnvPattern = regexp.MustCompile(`\$\{(\w+):([^}]*)\}|\$\{(\w+)\}|\$(\w+)`)
-
-// ExpandEnv 执行环境变量展开
-func ExpandEnv(s string) string {
-	return EnvPattern.ReplaceAllStringFunc(s, func(match string) string {
-		sub := EnvPattern.FindStringSubmatch(match)
-		if sub[1] != "" {
-			// ${VAR:default}
-			if val, ok := os.LookupEnv(sub[1]); ok {
-				return val
-			}
-			return sub[2]
-		}
-		// ${VAR} 或 $VAR
-		varName := sub[3]
-		if varName == "" {
-			varName = sub[4]
-		}
-		if val, ok := os.LookupEnv(varName); ok {
-			return val
-		}
-		return match // 环境变量不存在时保留原文
-	})
-}
-
 // Load 从 YAML 文件加载应用配置
 func Load(path string) (*AppConfig, error) {
 	cfg := DefaultAppConfig()
@@ -180,7 +159,7 @@ func Load(path string) (*AppConfig, error) {
 	}
 
 	// 展开环境变量 ${VAR:default} 语法
-	expanded := ExpandEnv(string(data))
+	expanded := pkgenv.ExpandEnv(string(data))
 
 	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
 		return nil, err

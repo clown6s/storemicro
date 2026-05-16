@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/go-kratos/kratos/v2/config"
+	"go.uber.org/zap"
 )
 
 var _ config.Source = (*envFile)(nil)
@@ -17,8 +18,9 @@ var _ config.Source = (*envFile)(nil)
 // 使用单次正则匹配，避免 os.ExpandEnv 双重展开导致密码含 $ 时被截断
 var envPattern = regexp.MustCompile(`\$\{(\w+):([^}]*)\}|\$\{(\w+)\}|\$(\w+)`)
 
-// expandEnv 支持 ${VAR:default}、${VAR} 和 $VAR 语法
-func expandEnv(s string) string {
+// ExpandEnv 支持 ${VAR:default}、${VAR} 和 $VAR 语法，导出供外部使用。
+// 使用单次正则匹配，避免 os.ExpandEnv 双重展开导致密码含 $ 时被截断
+func ExpandEnv(s string) string {
 	return envPattern.ReplaceAllStringFunc(s, func(match string) string {
 		sub := envPattern.FindStringSubmatch(match)
 		if sub[1] != "" {
@@ -56,8 +58,13 @@ func (f *envFile) loadFile(path string) (*config.KeyValue, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
-	data, err := io.ReadAll(file)
+	defer func() {
+		if cerr := file.Close(); cerr != nil {
+			zap.L().Warn("failed to close config file", zap.String("path", path), zap.Error(cerr))
+		}
+	}()
+	// 限制最大读取 10MB，防止指向超大文件或 FIFO 导致 OOM
+	data, err := io.ReadAll(io.LimitReader(file, 10<<20))
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +74,7 @@ func (f *envFile) loadFile(path string) (*config.KeyValue, error) {
 		return nil, err
 	}
 	// 展开 YAML 中的环境变量引用
-	expanded := expandEnv(string(data))
+	expanded := ExpandEnv(string(data))
 	return &config.KeyValue{
 		Key:    info.Name(),
 		Format: format(info.Name()),

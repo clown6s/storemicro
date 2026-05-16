@@ -24,6 +24,7 @@ var ProviderSet = wire.NewSet(NewGRPCServer)
 // NewGRPCServer 创建 gRPC 服务器
 func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.DistrictService) *kratosgrpc.Server {
 	if c.Grpc == nil {
+		log.Errorf("grpc server config is nil, check config.yaml server.grpc section")
 		panic("grpc server config must not be nil, check config.yaml server.grpc section")
 	}
 	timeout := 3 * time.Second
@@ -40,6 +41,11 @@ func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.DistrictServi
 		// 连接保活：10 分钟最大连接年龄，防止连接泄漏
 		kratosgrpc.Options(sgrpc.KeepaliveParams(keepalive.ServerParameters{
 			MaxConnectionAge: 10 * time.Minute,
+		})),
+		// 防止恶意客户端频繁发送 PING 帧导致 DoS
+		kratosgrpc.Options(sgrpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
+			MinTime:             10 * time.Second,
+			PermitWithoutStream: true,
 		})),
 		kratosgrpc.Middleware(
 			recovery.Recovery(),

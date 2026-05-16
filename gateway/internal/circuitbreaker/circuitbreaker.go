@@ -3,6 +3,7 @@ package circuitbreaker
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,9 +24,16 @@ type Config struct {
 
 // store 按服务名隔离的熔断器存储
 type store struct {
-	mu  sync.RWMutex
-	cbs map[string]*gobreaker.CircuitBreaker
-	cfg *Config
+	mu        sync.RWMutex
+	cbs       map[string]*gobreaker.CircuitBreaker
+	cfg       *Config
+	defaultCB *gobreaker.CircuitBreaker // 未知服务名使用的通用熔断器
+}
+
+// allowedServiceNames 已知服务名白名单，防止 map 无限增长
+var allowedServiceNames = map[string]bool{
+	"User":     true,
+	"District": true,
 }
 
 var (
@@ -57,11 +65,30 @@ func Init(cfg *Config) {
 		globalCB = &store{
 			cbs: make(map[string]*gobreaker.CircuitBreaker),
 			cfg: cfg,
+			defaultCB: gobreaker.NewCircuitBreaker(gobreaker.Settings{
+				Name:        "grpc-default",
+				MaxRequests: uint32(cfg.MaxRequests),
+				Interval:    time.Duration(cfg.Interval) * time.Second,
+				Timeout:     time.Duration(cfg.Timeout) * time.Second,
+				ReadyToTrip: func(counts gobreaker.Counts) bool {
+					if counts.Requests < uint32(cfg.MinRequests) {
+						return false
+					}
+					return float64(counts.TotalFailures)/float64(counts.Requests) >= cfg.FailureRatio
+				},
+			}),
 		}
 	})
 }
 
 func (s *store) getCB(serviceName string) *gobreaker.CircuitBreaker {
+	// 未知服务名返回通用熔断器，防止 map 无限增长
+	if !allowedServiceNames[serviceName] {
+		pkglog.L().Warn("circuit breaker: unknown service name, using default",
+			zap.String("service", serviceName))
+		return s.defaultCB
+	}
+
 	s.mu.RLock()
 	cb, ok := s.cbs[serviceName]
 	s.mu.RUnlock()
@@ -99,17 +126,17 @@ func (s *store) getCB(serviceName string) *gobreaker.CircuitBreaker {
 }
 
 // extractServiceName 从 gRPC 方法名解析服务名
+// 输入格式: "/package.service.version.ServiceName/Method"
+// 输出: "ServiceName"
 func extractServiceName(method string) string {
-	for i, c := range method {
-		if c == '/' {
-			method = method[i+1:]
-			break
-		}
+	method = strings.TrimPrefix(method, "/")
+	// 取最后一个 '/' 之前的部分作为 service path
+	if idx := strings.LastIndex(method, "/"); idx >= 0 {
+		method = method[:idx]
 	}
-	for i, c := range method {
-		if c == '.' {
-			return method[:i]
-		}
+	// method = "api.user.v1.User" → 取最后一个 '.' 之后
+	if idx := strings.LastIndex(method, "."); idx >= 0 {
+		return method[idx+1:]
 	}
 	return method
 }

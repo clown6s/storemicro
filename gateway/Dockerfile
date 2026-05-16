@@ -5,10 +5,11 @@ RUN apk add --no-cache git
 
 WORKDIR /app
 
+# Copy go.mod first for dependency caching
 COPY go.mod go.sum ./
-COPY configs/ ./configs/
-COPY cmd/ ./cmd/
-COPY api/ ./api/
+RUN go mod download
+
+# Copy shared packages and service source
 COPY pkg/ /pkg/
 COPY . .
 
@@ -30,4 +31,4 @@ USER appuser
 EXPOSE 8080
 
 ENTRYPOINT ["/app/gateway"]
-CMD ["-conf", "configs/config.yaml"]
+CMD ["-conf", "configs"]

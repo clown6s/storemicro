@@ -100,13 +100,13 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 创建 HTTP 服务器（生产级超时配置 + 请求体大小限制）
+	// 创建 HTTP 服务器（超时从配置读取，请求体大小限制 10MB）
 	srv := &http.Server{
 		Addr:           appCfg.Server.Addr,
 		Handler:        limitRequestBody(newRootMux(proxy, appCfg.MetricsPassword), 10<<20),
-		ReadTimeout:    30 * time.Second,
-		WriteTimeout:   60 * time.Second,
-		IdleTimeout:    120 * time.Second,
+		ReadTimeout:    appCfg.Server.ReadTimeout,
+		WriteTimeout:   appCfg.Server.WriteTimeout,
+		IdleTimeout:    appCfg.Server.IdleTimeout,
 		MaxHeaderBytes: 1 << 20,
 	}
 

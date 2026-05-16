@@ -1,7 +1,6 @@
 package jwt
 
 import (
-	"errors"
 	"fmt"
 	"time"
 
@@ -23,6 +22,15 @@ type JWT struct {
 
 // NewJWT 创建 JWT 工具
 func NewJWT(secret string, expireHrs int64) *JWT {
+	if len(secret) < 32 {
+		panic("jwt secret must be at least 32 characters")
+	}
+	if expireHrs <= 0 {
+		panic("jwt expire_hours must be positive")
+	}
+	if expireHrs > 8760 {
+		panic("jwt expire_hours too large (max 8760 = 1 year)")
+	}
 	return &JWT{
 		secret:    []byte(secret),
 		expireHrs: expireHrs,
@@ -52,26 +60,4 @@ func (j *JWT) GenerateToken(userID int64) (string, error) {
 // ExpireHours 返回 token 过期时长（用于 Redis key TTL）
 func (j *JWT) ExpireHours() time.Duration {
 	return time.Duration(j.expireHrs) * time.Hour
-}
-
-// ParseToken 解析并验证 JWT token
-func (j *JWT) ParseToken(tokenStr string) (*Claims, error) {
-	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
-		// 校验签名算法，防止 none 算法伪造 token
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, jwt.ErrSignatureInvalid
-		}
-		return j.secret, nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if !token.Valid {
-		return nil, errors.New("invalid token")
-	}
-	claims, ok := token.Claims.(*Claims)
-	if !ok {
-		return nil, errors.New("invalid claims")
-	}
-	return claims, nil
 }

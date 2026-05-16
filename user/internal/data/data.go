@@ -1,16 +1,15 @@
 package data
 
 import (
-	"context"
 	"database/sql"
-	"time"
+	"errors"
 
 	"user/internal/conf"
 	"user/internal/pkg/redis"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/google/wire"
-	pkgretry "github.com/storemicro/pkg/retry"
+	pkgdb "github.com/storemicro/pkg/dbutil"
 	"go.uber.org/zap"
 )
 
@@ -29,40 +28,30 @@ func (d *Data) DB() *sql.DB { return d.db }
 // Redis 返回底层 Redis 客户端（供健康检查使用）
 func (d *Data) Redis() *redis.Redis { return d.redis }
 
-// NewData 创建 Data 实例
+// NewData 创建 Data 实例（使用共享的 dbutil 连接池和重试逻辑）
 func NewData(c *conf.Data, r *redis.Redis) (*Data, func(), error) {
-	db, err := sql.Open("mysql", c.Database.Source)
+	if c == nil || c.Database == nil {
+		return nil, nil, errors.New("data.database config is required")
+	}
+	if c.Database.Source == "" {
+		return nil, nil, errors.New("database source (DSN) is required")
+	}
+	pool := pkgdb.DefaultPool()
+	if c.Database.MaxOpenConns > 0 {
+		pool.MaxOpenConns = int(c.Database.MaxOpenConns)
+	}
+	if c.Database.MaxIdleConns > 0 {
+		pool.MaxIdleConns = int(c.Database.MaxIdleConns)
+	}
+	if c.Database.ConnMaxLifetime > 0 {
+		pool.ConnMaxLifetime = int(c.Database.ConnMaxLifetime)
+	}
+	if c.Database.ConnMaxIdleTime > 0 {
+		pool.ConnMaxIdleTime = int(c.Database.ConnMaxIdleTime)
+	}
+
+	db, err := pkgdb.Connect("mysql", c.Database.Source, pool)
 	if err != nil {
-		return nil, nil, err
-	}
-
-	maxOpenConns := c.Database.MaxOpenConns
-	if maxOpenConns <= 0 {
-		maxOpenConns = 100
-	}
-	maxIdleConns := c.Database.MaxIdleConns
-	if maxIdleConns <= 0 {
-		maxIdleConns = 25
-	}
-	connMaxLifetime := time.Duration(c.Database.ConnMaxLifetime) * time.Second
-	if connMaxLifetime <= 0 {
-		connMaxLifetime = time.Hour
-	}
-
-	db.SetMaxOpenConns(int(maxOpenConns))
-	db.SetMaxIdleConns(int(maxIdleConns))
-	db.SetConnMaxLifetime(connMaxLifetime)
-	db.SetConnMaxIdleTime(connMaxLifetime / 2) // 空闲连接最大存活时间为最大生命周期的二分之一
-
-	// 带重试的 MySQL 连接验证（5 次指数退避，60s 总超时）
-	retryCtx, retryCancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer retryCancel()
-	if err := pkgretry.Do(retryCtx, pkgretry.DefaultConfig(), "mysql",
-		func(rCtx context.Context) error {
-			return db.PingContext(rCtx)
-		},
-	); err != nil {
-		_ = db.Close()
 		return nil, nil, err
 	}
 

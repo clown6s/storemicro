@@ -3,7 +3,7 @@ package retry
 import (
 	"context"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"time"
 
 	"go.uber.org/zap"
@@ -39,6 +39,13 @@ func Do(ctx context.Context, cfg Config, name string, fn func(ctx context.Contex
 	// [L6] MaxAttempts 校验
 	if cfg.MaxAttempts < 1 {
 		return fmt.Errorf("%s: MaxAttempts must be >= 1, got %d", name, cfg.MaxAttempts)
+	}
+	// BackoffMultiplier 溢出保护
+	if cfg.BackoffMultiplier <= 0 {
+		cfg.BackoffMultiplier = 1.0
+	}
+	if cfg.BackoffMultiplier > 10 {
+		cfg.BackoffMultiplier = 10.0
 	}
 
 	var lastErr error

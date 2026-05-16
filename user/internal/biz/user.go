@@ -3,6 +3,7 @@ package biz
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"sync"
 
@@ -44,6 +45,7 @@ var (
 	ErrPasswordNoLower   = errors.New("password must contain at least one lowercase letter")
 	ErrPasswordNoDigit   = errors.New("password must contain at least one digit")
 	ErrPasswordNoSpecial = errors.New("password must contain at least one special character")
+	ErrNameTooShort      = errors.New("real name too short (min 2 characters)")
 	ErrNameTooLong       = errors.New("real name too long (max 50)")
 	ErrRemarkTooLong     = errors.New("remark too long (max 200)")
 	ErrAvatarTooLong     = errors.New("avatar URL too long (max 500)")
@@ -219,9 +221,9 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 			}
 			return "", nil, ErrWrongCredentials
 		}
-		// 数据库错误，直接返回，不做 dummy 比较（避免在 DB 故障时也产生 bcrypt 延迟）
+		// 数据库错误，包装为内部错误返回（避免泄露连接信息）
 		zap.L().Error("login failed: db error", zap.String("phone", pkgstr.MaskPhone(phone)), zap.Error(err))
-		return "", nil, err
+		return "", nil, fmt.Errorf("internal error")
 	}
 
 	// 验证密码
@@ -293,11 +295,17 @@ func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32, phon
 	if pageSize > 100 {
 		pageSize = 100
 	}
+	if page > 10000 {
+		page = 10000
+	}
 	if phone != "" && !phoneRegex.MatchString(phone) {
 		return nil, 0, ErrInvalidPhone
 	}
 	if len(name) > 50 {
 		return nil, 0, ErrNameTooLong
+	}
+	if name != "" && len(name) < 2 {
+		return nil, 0, ErrNameTooShort
 	}
 
 	users, total, err := uc.repo.List(ctx, page, pageSize, phone, name, sortBy, sortOrder)

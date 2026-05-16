@@ -75,6 +75,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 校验必填配置段
+	if bc.Registry == nil || bc.Registry.Etcd == nil {
+		fmt.Fprintln(os.Stderr, "error: config missing [registry.etcd] section")
+		os.Exit(1)
+	}
+	if bc.Logger == nil {
+		fmt.Fprintln(os.Stderr, "error: config missing [logger] section")
+		os.Exit(1)
+	}
+	if bc.Jwt == nil {
+		fmt.Fprintln(os.Stderr, "error: config missing [jwt] section")
+		os.Exit(1)
+	}
+	if bc.Tracing == nil {
+		fmt.Fprintln(os.Stderr, "error: config missing [tracing] section")
+		os.Exit(1)
+	}
+
 	// 初始化 zap logger（支持 dev/prod 模式、文件轮转）
 	logCfg := pkglog.Config{
 		Level:      bc.Logger.Level,
@@ -114,9 +132,11 @@ func main() {
 		}
 	}()
 
-	// 创建 etcd client 和 registrar（带重试）
+	// 创建 etcd client 和 registrar（带重试，60s 整体超时）
 	var etcdClient *clientv3.Client
-	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "etcd",
+	etcdCtx, etcdCancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer etcdCancel()
+	if err := pkgretry.Do(etcdCtx, pkgretry.DefaultConfig(), "etcd",
 		func(rCtx context.Context) error {
 			if etcdClient != nil {
 				etcdClient.Close()

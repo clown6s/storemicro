@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/wire"
 	pkgstr "github.com/storemicro/pkg/strutil"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -47,7 +48,11 @@ func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*use
 
 // Register 用户注册
 func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error) {
-	zap.L().Debug("Register called", zap.String("phone", pkgstr.MaskPhone(req.Phone)))
+	zap.L().Debug("Register called",
+		zap.String("phone", pkgstr.MaskPhone(req.Phone)),
+		zap.String("email", req.Email),
+		zap.String("real_name", req.RealName),
+	)
 
 	user := &biz.User{
 		Phone:    req.Phone,
@@ -73,7 +78,11 @@ func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*u
 
 // Login 用户登录
 func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.LoginResp, error) {
-	zap.L().Debug("Login called", zap.String("phone", pkgstr.MaskPhone(req.Phone)))
+	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID().String()
+	zap.L().Debug("Login called",
+		zap.String("phone", pkgstr.MaskPhone(req.Phone)),
+		zap.String("trace_id", traceID),
+	)
 
 	token, user, err := s.uc.Login(ctx, req.Phone, req.Password)
 	if err != nil {
@@ -144,10 +153,14 @@ func (s *UserService) UpdateUser(ctx context.Context, req *userv1.UpdateUserReq)
 		Age:      req.Age,
 		Remark:   req.Remark,
 	}
-	// 构建 UpdateFields 标记需要强制清空的字段
+	// 构建 UpdateFields 标记需要强制清空的字段（白名单校验）
 	if len(req.ForceClearFields) > 0 {
+		allowed := map[string]bool{"email": true, "remark": true, "avatar": true, "real_name": true, "gender": true, "age": true}
 		user.UpdateFields = make(map[string]bool, len(req.ForceClearFields))
 		for _, f := range req.ForceClearFields {
+			if !allowed[f] {
+				return nil, status.Errorf(codes.InvalidArgument, "invalid force clear field: %s", f)
+			}
 			user.UpdateFields[f] = true
 		}
 	}
@@ -221,6 +234,7 @@ func (s *UserService) mapError(err error) error {
 		errors.Is(err, biz.ErrPasswordNoLower),
 		errors.Is(err, biz.ErrPasswordNoDigit),
 		errors.Is(err, biz.ErrNameTooLong),
+		errors.Is(err, biz.ErrNameTooShort),
 		errors.Is(err, biz.ErrRemarkTooLong),
 		errors.Is(err, biz.ErrAvatarTooLong),
 		errors.Is(err, biz.ErrEmailTooLong),

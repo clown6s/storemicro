@@ -1,9 +1,12 @@
 # IDE
 .idea/
+.vscode/
 
 # OS
 .DS_Store
 Thumbs.db
+*.swp
+*.swo
 
 # Build
 *.exe
@@ -16,6 +19,9 @@ Thumbs.db
 vendor/
 *.test
 *.out
+go.work
+go.work.sum
+*.coverprofile
 
 # Logs
 logs/
@@ -27,10 +33,6 @@ logs/
 # Environment files (may contain secrets)
 **/.env
 **/.env.*
-/.env
-/gateway/.env
-/user/.env
-/district/.env
 
 # Config files with secrets (use config.yaml.example as template)
 district/configs/config.yaml

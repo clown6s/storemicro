@@ -41,6 +41,9 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 	if c.Database.ConnMaxLifetime > 0 {
 		pool.ConnMaxLifetime = int(c.Database.ConnMaxLifetime)
 	}
+	if c.Database.ConnMaxIdleTime > 0 {
+		pool.ConnMaxIdleTime = int(c.Database.ConnMaxIdleTime)
+	}
 
 	db, err := pkgdb.Connect("mysql", c.Database.Source, pool)
 	if err != nil {

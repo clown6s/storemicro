@@ -5,9 +5,16 @@ services:
       dockerfile: Dockerfile
     ports:
       - "9101:9101"
+      # gRPC :9001 仅容器内通信，不映射宿主机
     environment:
       - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=mysql
+      - DB_PORT=3306
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - ETCD_ENDPOINT=etcd:2379
+      - TRACING_ENDPOINT=jaeger:4317
       - JWT_SECRET=${JWT_SECRET}
       - LOG_LEVEL=info
     depends_on:
@@ -41,8 +48,13 @@ services:
       dockerfile: Dockerfile
     ports:
       - "9103:9103"
+      # gRPC :9003 仅容器内通信，不映射宿主机
     environment:
       - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - ETCD_ENDPOINT=etcd:2379
+      - TRACING_ENDPOINT=jaeger:4317
       - LOG_LEVEL=info
     depends_on:
       mysql:
@@ -76,6 +88,8 @@ services:
     environment:
       - JWT_SECRET=${JWT_SECRET}
       - REDIS_PASSWORD=${REDIS_PASSWORD}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
       - METRICS_PASSWORD=${METRICS_PASSWORD:-}
       - LOG_LEVEL=info
     depends_on:

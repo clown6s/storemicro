@@ -144,6 +144,8 @@ func (l *ZapLogger) Log(level log.Level, keyvals ...any) error {
 		}
 		key, ok := keyvals[i].(string)
 		if !ok {
+			// 非 string key 保留为 Any 字段，避免静默丢失日志信息
+			fields = append(fields, zap.Any(fmt.Sprintf("non_string_key_%d", i/2), keyvals[i]))
 			continue
 		}
 		val := keyvals[i+1]
@@ -201,6 +203,10 @@ func parseLevel(s string) zapcore.Level {
 func Validate(cfg Config) error {
 	if cfg.Mode != "" && cfg.Mode != "dev" && cfg.Mode != "prod" {
 		return fmt.Errorf("logger.mode must be 'dev' or 'prod', got: %s", cfg.Mode)
+	}
+	validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "warning": true, "error": true}
+	if cfg.Level != "" && !validLevels[cfg.Level] {
+		return fmt.Errorf("logger.level must be debug/info/warn/error, got: %s", cfg.Level)
 	}
 	return nil
 }

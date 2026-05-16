@@ -15,6 +15,7 @@ type DefaultPoolConfig struct {
 	MaxOpenConns    int
 	MaxIdleConns    int
 	ConnMaxLifetime int // 秒
+	ConnMaxIdleTime int // 秒，0 表示自动取 ConnMaxLifetime/2
 }
 
 // DefaultPool 返回默认连接池配置
@@ -26,8 +27,14 @@ func DefaultPool() DefaultPoolConfig {
 	}
 }
 
+// allowedDrivers 数据库驱动白名单
+var allowedDrivers = map[string]bool{"mysql": true}
+
 // Connect 创建并验证 MySQL 连接（带重试和连接池配置）
 func Connect(driver, dsn string, pool DefaultPoolConfig) (*sql.DB, error) {
+	if !allowedDrivers[driver] {
+		return nil, fmt.Errorf("unsupported database driver: %s", driver)
+	}
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open database failed: %w", err)
@@ -47,7 +54,15 @@ func Connect(driver, dsn string, pool DefaultPoolConfig) (*sql.DB, error) {
 	db.SetMaxOpenConns(pool.MaxOpenConns)
 	db.SetMaxIdleConns(pool.MaxIdleConns)
 	db.SetConnMaxLifetime(time.Duration(pool.ConnMaxLifetime) * time.Second)
-	db.SetConnMaxIdleTime(time.Duration(pool.ConnMaxLifetime/2) * time.Second) // 空闲连接最大存活时间为最大生命周期的半
+	// 空闲连接最大存活时间：优先用独立配置，否则取最大生命周期的半，最少 60s
+	idleTime := pool.ConnMaxIdleTime
+	if idleTime <= 0 {
+		idleTime = pool.ConnMaxLifetime / 2
+	}
+	if idleTime < 60 {
+		idleTime = 60
+	}
+	db.SetConnMaxIdleTime(time.Duration(idleTime) * time.Second)
 
 	// [C5] 带可取消 context 的 MySQL 连接验证
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
