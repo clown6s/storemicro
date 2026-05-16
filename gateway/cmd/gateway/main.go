@@ -130,7 +130,12 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 	// 健康检查端点（Kubernetes liveness probe — 仅检查进程存活）
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		b, _ := json.Marshal(map[string]string{"status": "ok"})
+		b, err := json.Marshal(map[string]string{"status": "ok"})
+		if err != nil {
+			pkglog.L().Error("healthz json marshal failed", zap.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		_, _ = w.Write(b)
 	})
 
@@ -175,16 +180,27 @@ func newRootMux(proxy *GatewayProxy, metricsPassword string) http.Handler {
 			code = http.StatusServiceUnavailable
 		}
 
-		b, _ := json.Marshal(map[string]any{"status": status, "checks": checks})
+		b, err := json.Marshal(map[string]any{"status": status, "checks": checks})
+		if err != nil {
+			pkglog.L().Error("readyz json marshal failed", zap.Error(err))
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(code)
 		_, _ = w.Write(b)
 	})
 
 	// Prometheus metrics 端点（需要 metrics 密钥认证，防止暴露内部指标）
-	if metricsPassword != "" {
-		mux.Handle("/metrics", metricsAuth(promhttp.Handler(), metricsPassword))
+	// R4-SEC-05: metrics 端点必须有密码保护，空密码拒绝访问
+	if metricsPassword == "" {
+		pkglog.L().Warn("metrics: no password configured, metrics endpoint is disabled")
+		mux.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write([]byte(`{"code":401,"message":"metrics password not configured"}`))
+		}))
 	} else {
-		mux.Handle("/metrics", promhttp.Handler())
+		mux.Handle("/metrics", metricsAuth(promhttp.Handler(), metricsPassword))
 	}
 
 	// 其余所有请求走 gateway proxy

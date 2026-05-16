@@ -72,7 +72,9 @@ func Do(ctx context.Context, cfg Config, name string, fn func(ctx context.Contex
 		timer := time.NewTimer(backoff)
 		select {
 		case <-ctx.Done():
-			timer.Stop()
+			if !timer.Stop() {
+				<-timer.C
+			}
 			return fmt.Errorf("%s: context cancelled during retry: %w", name, ctx.Err())
 		case <-timer.C:
 		}

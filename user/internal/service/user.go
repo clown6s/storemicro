@@ -162,7 +162,7 @@ func (s *UserService) mapError(err error) error {
 	case errors.Is(err, biz.ErrUserNotFound):
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, biz.ErrPhoneExists), errors.Is(err, biz.ErrEmailExists):
-		return status.Error(codes.AlreadyExists, err.Error())
+		return status.Error(codes.AlreadyExists, "user already exists")
 	case errors.Is(err, biz.ErrInvalidUserID),
 		errors.Is(err, biz.ErrPhoneRequired),
 		errors.Is(err, biz.ErrPasswordRequired),

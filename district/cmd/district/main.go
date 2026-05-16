@@ -197,7 +197,12 @@ func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *htt
 	// liveness — 仅检查进程存活
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		b, _ := json.Marshal(map[string]string{"status": "ok", "service": Name})
+		b, err := json.Marshal(map[string]string{"status": "ok", "service": Name})
+		if err != nil {
+			helper.Errorf("healthz json marshal failed: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		_, _ = w.Write(b)
 	})
 	// readiness — 检查 MySQL 连通性
@@ -228,7 +233,12 @@ func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *htt
 			status = "not ready"
 			code = http.StatusServiceUnavailable
 		}
-		b, _ := json.Marshal(map[string]any{"status": status, "checks": checks})
+		b, err := json.Marshal(map[string]any{"status": status, "checks": checks})
+		if err != nil {
+			helper.Errorf("readyz json marshal failed: %v", err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
 		w.WriteHeader(code)
 		_, _ = w.Write(b)
 	})

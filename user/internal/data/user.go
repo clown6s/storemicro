@@ -161,7 +161,9 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 	committed := false
 	defer func() {
 		if !committed {
-			tx.Rollback()
+			if err := tx.Rollback(); err != nil {
+				zap.L().Error("UpdateTx rollback failed", zap.Error(err))
+			}
 		}
 	}()
 
@@ -292,7 +294,9 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 	committed := false
 	defer func() {
 		if !committed {
-			tx.Rollback()
+			if err := tx.Rollback(); err != nil {
+				zap.L().Error("RegisterTx rollback failed", zap.Error(err))
+			}
 		}
 	}()
 

@@ -273,6 +273,9 @@ func (c *GrpcClientConfig) BuildServiceConfig() string {
 		}
 	}
 
-	b, _ := json.Marshal(sc)
+	b, err := json.Marshal(sc)
+	if err != nil {
+		return ""
+	}
 	return string(b)
 }

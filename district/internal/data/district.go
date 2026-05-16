@@ -96,5 +96,8 @@ func scanDistricts(rows *sql.Rows) ([]*biz.District, error) {
 		zap.L().Error("districtRepo rows error", zap.Error(err))
 		return nil, fmt.Errorf("district rows error: %w", err)
 	}
+	if districts == nil {
+		districts = []*biz.District{}
+	}
 	return districts, nil
 }

@@ -10,7 +10,6 @@ import (
 	pkglog "github.com/storemicro/pkg/zaplogger"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/metadata"
 )
 
 // cbStore 按服务名隔离的熔断器存储
@@ -92,16 +91,9 @@ func (s *cbStore) getCB(serviceName string) *gobreaker.CircuitBreaker {
 	return cb
 }
 
-// extractServiceName 从 gRPC context 中提取服务名
-// 优先从 metadata 中的 x-service-name 获取（由网关注入），否则回退到方法解析
+// extractServiceName 从 gRPC 方法名解析服务名
+// 方法格式 "/user.User/GetUser" → "user"
 func extractServiceName(ctx context.Context, method string) string {
-	// 尝试从 metadata 获取（适用于 proxy 侧注入的场景）
-	if md, ok := metadata.FromOutgoingContext(ctx); ok {
-		if svc, ok := md["x-service-name"]; ok && len(svc) > 0 {
-			return svc[0]
-		}
-	}
-	// 回退：从 gRPC 方法名解析（如 "/user.User/GetUser" → "user"）
 	for i, c := range method {
 		if c == '/' {
 			method = method[i+1:]

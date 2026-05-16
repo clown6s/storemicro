@@ -278,7 +278,7 @@ func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32, phon
 	if pageSize > 100 {
 		pageSize = 100
 	}
-	if len(phone) > 11 {
+	if phone != "" && !phoneRegex.MatchString(phone) {
 		return nil, 0, ErrInvalidPhone
 	}
 	if len(name) > 50 {

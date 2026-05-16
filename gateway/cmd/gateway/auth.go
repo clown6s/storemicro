@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/binary"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -61,10 +64,10 @@ func corsMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
 			if origin != "" {
-				if _, ok := originSet[origin]; ok {
+				if isAllowedOrigin(origin, originSet) {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
-					w.Header().Set("Vary", "Origin")
-					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+					w.Header().Add("Vary", "Origin")
+					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 					w.Header().Set("Access-Control-Allow-Credentials", "true")
 					w.Header().Set("Access-Control-Max-Age", "86400")
@@ -77,6 +80,38 @@ func corsMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// isAllowedOrigin 检查 origin 是否在允许列表中，支持通配符子域名匹配 (*.example.com)
+// R4-SEC-02: 添加通配符子域名匹配支持
+func isAllowedOrigin(origin string, allowed map[string]struct{}) bool {
+	// 精确匹配
+	if _, ok := allowed[origin]; ok {
+		return true
+	}
+
+	// 通配符子域名匹配 (*.example.com)
+	for a := range allowed {
+		if strings.HasPrefix(a, "https://") {
+			domain := strings.TrimPrefix(a, "https://")
+			if strings.HasPrefix(domain, "*.") {
+				baseDomain := domain[2:]
+				if strings.HasSuffix(origin, baseDomain) && origin != baseDomain {
+					return true
+				}
+			}
+		}
+		if strings.HasPrefix(a, "http://") {
+			domain := strings.TrimPrefix(a, "http://")
+			if strings.HasPrefix(domain, "*.") {
+				baseDomain := domain[2:]
+				if strings.HasSuffix(origin, baseDomain) && origin != baseDomain {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 type Claims struct {
@@ -99,16 +134,17 @@ var noAuthRoutes = map[string]struct{}{
 
 // [H2] rateLimitScript Lua 脚本原子化限流操作
 // KEYS[1] = 限流 key
-// ARGV[1] = 窗口起始时间（毫秒），ARGV[2] = 当前时间（毫秒），ARGV[3] = 最大请求数，ARGV[4] = 过期秒数
+// ARGV[1] = 窗口起始时间（毫秒），ARGV[2] = 当前时间（毫秒），ARGV[3] = 最大请求数，ARGV[4] = 过期秒数，ARGV[5] = 加密随机数
 // 流程：清理过期成员 → 统计窗口内请求数 → 添加新请求 → 设置过期
 // 全部在 Lua 中原子执行，避免 Pipeline 非原子竞态
+// R4-SEC-03: 移除了 math.random()，改用 Go 层传入的 crypto/rand 随机数
 var rateLimitScript = redis.NewScript(`
 redis.call('ZREMRANGEBYSCORE', KEYS[1], '0', ARGV[1])
 local count = redis.call('ZCARD', KEYS[1])
 if tonumber(count) >= tonumber(ARGV[3]) then
     return count
 end
-redis.call('ZADD', KEYS[1], ARGV[2], ARGV[2] .. '-' .. math.random(1000000))
+redis.call('ZADD', KEYS[1], ARGV[2], ARGV[2] .. '-' .. ARGV[5])
 redis.call('EXPIRE', KEYS[1], ARGV[4])
 return count + 1
 `)
@@ -131,13 +167,26 @@ func (rl *redisRateLimiter) allow(ctx context.Context, key string) bool {
 	now := time.Now().UnixMilli()
 	windowStart := now - rl.windowSec*1000
 
-	// [M13] Member 使用 时间戳-随机数 保证唯一性
+	// R4-SEC-03: 使用 crypto/rand 生成加密安全的随机数
+	var randBytes [8]byte
+	if _, err := rand.Read(randBytes[:]); err != nil {
+		pkglog.L().Warn("rate limiter: crypto/rand failed, using fallback",
+			zap.String("key", key),
+			zap.Error(err),
+		)
+		// 熵源失败时使用时间戳+随机 math.random 作为 fallback
+		randBytes[0] = byte(now & 0xFF)
+		randBytes[1] = byte((now >> 8) & 0xFF)
+	}
+	randStr := fmt.Sprintf("%016x", binary.BigEndian.Uint64(randBytes[:]))
+
 	result, err := rateLimitScript.Run(ctx, rl.rdb,
 		[]string{key},
 		strconv.FormatInt(windowStart, 10),
 		strconv.FormatInt(now, 10),
 		strconv.FormatInt(rl.maxRequests, 10),
 		strconv.FormatInt(rl.windowSec, 10),
+		randStr,
 	).Int64()
 
 	if err != nil {
@@ -166,7 +215,8 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			if limiter, ok := rateLimitRoutes[route]; ok {
 				ip := extractIP(r, trustedProxies)
 				if !limiter.allow(r.Context(), "storemicro:rl:"+cleaned+":"+ip) {
-					pkglog.L().Warn("rate limited", zap.String("path", cleaned), zap.String("ip", ip))
+					// R4-SEC-04: IP 脱敏日志
+					pkglog.L().Warn("rate limited", zap.String("path", cleaned), zap.String("ip", maskIP(ip)))
 					writeJSON(w, http.StatusTooManyRequests, `{"code":429,"message":"too many requests"}`)
 					return
 				}
@@ -213,10 +263,10 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 
 		// Redis token 验证使用独立超时，防止 Redis 慢查询卡住认证流程
 		redisCtx, redisCancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer redisCancel()
 
 		val, err := rdb.Get(redisCtx, "storemicro:token:"+tokenStr).Result()
 		if err == redis.Nil {
-			redisCancel()
 			pkglog.L().Warn("jwt auth failed: token revoked (logged in elsewhere)",
 				zap.String("path", cleaned),
 				zap.Int64("user_id", claims.UserID),
@@ -224,7 +274,6 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
 			return
 		} else if err != nil {
-			redisCancel()
 			pkglog.L().Error("redis check token failed, fail-closed",
 				zap.String("path", cleaned),
 				zap.Int64("user_id", claims.UserID),
@@ -233,7 +282,6 @@ func jwtAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			writeJSON(w, http.StatusServiceUnavailable, `{"code":503,"message":"service temporarily unavailable"}`)
 			return
 		}
-		redisCancel()
 
 		// 校验 Redis 中 token 对应的 userID 与 JWT claims 一致
 		redisUserID, parseErr := strconv.ParseInt(val, 10, 64)
@@ -337,4 +385,21 @@ func isTrustedProxy(ip string, trustedProxies []string) bool {
 		}
 	}
 	return false
+}
+
+// maskIP 脱敏 IP 地址：保留前两个八位组，隐藏后两部分 (GDPR 合规)
+// 例如: 192.168.1.100 → 192.168.x.x
+// R4-SEC-04: IP 脱敏以满足隐私合规要求
+func maskIP(ip string) string {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return "unknown"
+	}
+	if v4 := parsed.To4(); v4 != nil {
+		return fmt.Sprintf("%d.%d.x.x", v4[0], v4[1])
+	}
+	if len(parsed) >= 4 {
+		return fmt.Sprintf("%x:%x:%x:%x:x:x:x:x", parsed[0], parsed[1], parsed[2], parsed[3])
+	}
+	return "masked"
 }
