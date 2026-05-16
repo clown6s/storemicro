@@ -20,7 +20,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/district ./cmd/district
 # Runtime stage
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata curl
 RUN adduser -D -u 1000 appuser
 ENV TZ=Asia/Shanghai
 
@@ -32,5 +32,8 @@ USER appuser
 
 EXPOSE 9003 9103
 
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -sf http://localhost:9103/healthz || exit 1
+
 ENTRYPOINT ["/app/district"]
-CMD ["-conf", "configs"]
+CMD ["-conf", "configs/config.yaml"]

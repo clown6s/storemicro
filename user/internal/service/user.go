@@ -43,6 +43,7 @@ func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*use
 		return nil, s.mapError(err)
 	}
 	return &userv1.GetUserResp{
+		Code:    200,
 		Message: "success",
 		Data:    s.toUserInfo(user),
 	}, nil
@@ -74,6 +75,7 @@ func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*u
 	}
 
 	return &userv1.RegisterResp{
+		Code:    200,
 		Message: "registered",
 	}, nil
 }
@@ -93,6 +95,7 @@ func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.
 	}
 
 	return &userv1.LoginResp{
+		Code:    200,
 		Message: "success",
 		Token:   token,
 		Data:    s.toUserInfo(user),
@@ -115,6 +118,7 @@ func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv
 	}
 
 	return &userv1.LogoutResp{
+		Code:    200,
 		Message: "logged out",
 	}, nil
 }
@@ -158,6 +162,7 @@ func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (
 	}
 
 	return &userv1.ListUsersResp{
+		Code:     200,
 		Message:  "success",
 		Data:     list,
 		Total:    total,
@@ -210,6 +215,7 @@ func (s *UserService) UpdateUser(ctx context.Context, req *userv1.UpdateUserReq)
 	}
 
 	return &userv1.UpdateUserResp{
+		Code:    200,
 		Message: "updated",
 	}, nil
 }
@@ -228,6 +234,7 @@ func (s *UserService) DeleteUser(ctx context.Context, req *userv1.DeleteUserReq)
 	}
 
 	return &userv1.DeleteUserResp{
+		Code:    200,
 		Message: "deleted",
 	}, nil
 }
