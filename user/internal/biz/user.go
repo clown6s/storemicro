@@ -49,6 +49,7 @@ var (
 	ErrNameTooLong       = errors.New("real name too long (max 50)")
 	ErrRemarkTooLong     = errors.New("remark too long (max 200)")
 	ErrAvatarTooLong     = errors.New("avatar URL too long (max 500)")
+	ErrInvalidAvatar     = errors.New("avatar must be an HTTP(S) URL")
 	ErrEmailTooLong      = errors.New("email too long (max 254)")
 	ErrInvalidGender     = errors.New("gender must be 0 (unknown), 1 (male), or 2 (female)")
 	ErrInvalidAge        = errors.New("age must be between 0 and 150")
@@ -56,12 +57,13 @@ var (
 
 // 手机号和邮箱格式正则
 var (
-	phoneRegex = regexp.MustCompile(`^1[3-9]\d{9}$`)
-	emailRegex = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
-	hasUpper   = regexp.MustCompile(`[A-Z]`)
-	hasLower   = regexp.MustCompile(`[a-z]`)
-	hasDigit   = regexp.MustCompile(`\d`)
-	hasSpecial = regexp.MustCompile(`[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?~]`)
+	phoneRegex  = regexp.MustCompile(`^1[3-9]\d{9}$`)
+	emailRegex  = regexp.MustCompile(`^[^\s@]+@[^\s@]+\.[^\s@]+$`)
+	avatarRegex = regexp.MustCompile(`^https?://\S+$`)
+	hasUpper    = regexp.MustCompile(`[A-Z]`)
+	hasLower    = regexp.MustCompile(`[a-z]`)
+	hasDigit    = regexp.MustCompile(`\d`)
+	hasSpecial  = regexp.MustCompile(`[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?~]`)
 )
 
 // [C3] 用于 timing-safe login 的 dummy bcrypt hash（cost=10, 随机 salt）
@@ -170,6 +172,9 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	if user.Age < 0 || user.Age > 150 {
 		return ErrInvalidAge
 	}
+	if len(user.RealName) > 0 && len(user.RealName) < 2 {
+		return ErrNameTooShort
+	}
 	if len(user.RealName) > 50 {
 		return ErrNameTooLong
 	}
@@ -178,6 +183,9 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	}
 	if len(user.Avatar) > 500 {
 		return ErrAvatarTooLong
+	}
+	if user.Avatar != "" && !avatarRegex.MatchString(user.Avatar) {
+		return ErrInvalidAvatar
 	}
 
 	// bcrypt 加密密码

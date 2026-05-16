@@ -58,8 +58,14 @@ func NewData(c *conf.Data, r *redis.Redis) (*Data, func(), error) {
 	d := &Data{db: db, redis: r}
 	cleanup := func() {
 		zap.L().Info("closing the data resources")
-		_ = d.db.Close()
-		_ = d.redis.Close()
+		if err := d.db.Close(); err != nil {
+			zap.L().Error("failed to close database", zap.Error(err))
+		}
+		if d.redis != nil {
+			if err := d.redis.Close(); err != nil {
+				zap.L().Error("failed to close redis", zap.Error(err))
+			}
+		}
 	}
 	return d, cleanup, nil
 }

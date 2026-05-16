@@ -76,6 +76,10 @@ func main() {
 	}
 
 	// 校验必填配置段
+	if bc.Server == nil || bc.Server.Grpc == nil {
+		fmt.Fprintln(os.Stderr, "error: config missing [server.grpc] section")
+		os.Exit(1)
+	}
 	if bc.Registry == nil || bc.Registry.Etcd == nil {
 		fmt.Fprintln(os.Stderr, "error: config missing [registry.etcd] section")
 		os.Exit(1)
@@ -86,6 +90,14 @@ func main() {
 	}
 	if bc.Jwt == nil {
 		fmt.Fprintln(os.Stderr, "error: config missing [jwt] section")
+		os.Exit(1)
+	}
+	if bc.Data == nil {
+		fmt.Fprintln(os.Stderr, "error: config missing [data] section")
+		os.Exit(1)
+	}
+	if bc.Redis == nil {
+		fmt.Fprintln(os.Stderr, "error: config missing [redis] section")
 		os.Exit(1)
 	}
 	if bc.Tracing == nil {
@@ -186,7 +198,9 @@ func main() {
 	if healthSrv != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = healthSrv.Shutdown(ctx)
+		if err := healthSrv.Shutdown(ctx); err != nil {
+			helper.Warnf("health server shutdown error: %v", err)
+		}
 	}
 }
 

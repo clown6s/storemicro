@@ -161,7 +161,9 @@ services:
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
+      environment:
+        - REDISCLI_AUTH=${REDIS_PASSWORD}
       interval: 10s
       timeout: 5s
       retries: 3

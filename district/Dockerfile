@@ -5,9 +5,14 @@ RUN apk add --no-cache git
 
 WORKDIR /app
 
+# Copy go.mod files first for dependency caching
 COPY go.mod go.sum ./
-COPY configs/ ./configs/
+RUN go mod download
+
+# Copy shared packages
 COPY pkg/ /pkg/
+
+# Copy service source (configs only needed at runtime)
 COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/district ./cmd/district
@@ -21,7 +26,7 @@ ENV TZ=Asia/Shanghai
 
 WORKDIR /app
 COPY --from=builder /bin/district .
-COPY --from=builder configs/ ./configs/
+COPY configs/ ./configs/
 
 USER appuser
 

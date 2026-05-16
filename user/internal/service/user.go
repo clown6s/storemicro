@@ -50,7 +50,7 @@ func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*use
 func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*userv1.RegisterResp, error) {
 	zap.L().Debug("Register called",
 		zap.String("phone", pkgstr.MaskPhone(req.Phone)),
-		zap.String("email", req.Email),
+		zap.String("email", pkgstr.MaskEmail(req.Email)),
 		zap.String("real_name", req.RealName),
 	)
 
@@ -237,6 +237,7 @@ func (s *UserService) mapError(err error) error {
 		errors.Is(err, biz.ErrNameTooShort),
 		errors.Is(err, biz.ErrRemarkTooLong),
 		errors.Is(err, biz.ErrAvatarTooLong),
+		errors.Is(err, biz.ErrInvalidAvatar),
 		errors.Is(err, biz.ErrEmailTooLong),
 		errors.Is(err, biz.ErrPasswordNoSpecial),
 		errors.Is(err, biz.ErrInvalidGender),

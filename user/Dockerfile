@@ -7,15 +7,14 @@ WORKDIR /app
 
 # Copy go.mod files first for dependency caching
 COPY go.mod go.sum ./
-COPY configs/ ./configs/
+RUN go mod download
 
-# Copy shared packages (replace with your actual module path structure)
+# Copy shared packages
 COPY pkg/ /pkg/
 
-# Copy service source
+# Copy service source (configs only needed at runtime)
 COPY . .
 
-# Build
 RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/user ./cmd/user
 
 # Runtime stage
@@ -27,7 +26,7 @@ ENV TZ=Asia/Shanghai
 
 WORKDIR /app
 COPY --from=builder /bin/user .
-COPY --from=builder configs/ ./configs/
+COPY configs/ ./configs/
 
 USER appuser
 

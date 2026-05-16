@@ -27,8 +27,10 @@ func NewRedis(addr, password string, db int) (*Redis, error) {
 		WriteTimeout: 5 * time.Second,
 		MaxRetries:   3,
 	})
-	// 验证连接（带重试）
-	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "redis",
+	// 验证连接（带重试，30s 整体超时）
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer pingCancel()
+	if err := pkgretry.Do(pingCtx, pkgretry.DefaultConfig(), "redis",
 		func(rCtx context.Context) error {
 			ctx, cancel := context.WithTimeout(rCtx, 5*time.Second)
 			defer cancel()

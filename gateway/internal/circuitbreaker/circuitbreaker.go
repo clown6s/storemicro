@@ -44,37 +44,39 @@ var (
 // Init 初始化熔断器存储（应用启动时调用一次）
 func Init(cfg *Config) {
 	initCBOnce.Do(func() {
-		if cfg.MaxRequests <= 0 {
-			cfg.MaxRequests = 5
+		// 复制配置，避免修改调用者的原始结构体
+		c := *cfg
+		if c.MaxRequests <= 0 {
+			c.MaxRequests = 5
 		}
-		if cfg.Interval <= 0 {
-			cfg.Interval = 10
+		if c.Interval <= 0 {
+			c.Interval = 10
 		}
-		if cfg.Timeout <= 0 {
-			cfg.Timeout = 30
+		if c.Timeout <= 0 {
+			c.Timeout = 30
 		}
-		if cfg.FailureRatio <= 0 {
-			cfg.FailureRatio = 0.5
+		if c.FailureRatio <= 0 {
+			c.FailureRatio = 0.5
 		}
-		if cfg.FailureRatio > 1 {
-			cfg.FailureRatio = 1.0
+		if c.FailureRatio > 1 {
+			c.FailureRatio = 1.0
 		}
-		if cfg.MinRequests <= 0 {
-			cfg.MinRequests = 10
+		if c.MinRequests <= 0 {
+			c.MinRequests = 10
 		}
 		globalCB = &store{
 			cbs: make(map[string]*gobreaker.CircuitBreaker),
-			cfg: cfg,
+			cfg: &c,
 			defaultCB: gobreaker.NewCircuitBreaker(gobreaker.Settings{
 				Name:        "grpc-default",
-				MaxRequests: uint32(cfg.MaxRequests),
-				Interval:    time.Duration(cfg.Interval) * time.Second,
-				Timeout:     time.Duration(cfg.Timeout) * time.Second,
+				MaxRequests: uint32(c.MaxRequests),
+				Interval:    time.Duration(c.Interval) * time.Second,
+				Timeout:     time.Duration(c.Timeout) * time.Second,
 				ReadyToTrip: func(counts gobreaker.Counts) bool {
-					if counts.Requests < uint32(cfg.MinRequests) {
+					if counts.Requests < uint32(c.MinRequests) {
 						return false
 					}
-					return float64(counts.TotalFailures)/float64(counts.Requests) >= cfg.FailureRatio
+					return float64(counts.TotalFailures)/float64(counts.Requests) >= c.FailureRatio
 				},
 			}),
 		}

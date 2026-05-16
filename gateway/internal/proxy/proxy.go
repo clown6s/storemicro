@@ -65,7 +65,10 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 		MaxRetries:   3,
 	})
 
-	if err := pkgretry.Do(context.Background(), pkgretry.DefaultConfig(), "redis",
+	// 验证 Redis 连接（带重试，30s 整体超时）
+	redisCtx, redisCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer redisCancel()
+	if err := pkgretry.Do(redisCtx, pkgretry.DefaultConfig(), "redis",
 		func(rCtx context.Context) error {
 			pingCtx, pingCancel := context.WithTimeout(rCtx, 5*time.Second)
 			defer pingCancel()

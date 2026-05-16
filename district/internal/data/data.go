@@ -53,7 +53,9 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 	d := &Data{db: db}
 	cleanup := func() {
 		zap.L().Info("closing the data resources")
-		_ = d.db.Close()
+		if err := d.db.Close(); err != nil {
+			zap.L().Error("failed to close database", zap.Error(err))
+		}
 	}
 	return d, cleanup, nil
 }

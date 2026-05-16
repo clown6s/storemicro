@@ -169,6 +169,15 @@ func Load(path string) (*AppConfig, error) {
 	if cfg.Server.Addr == "" {
 		cfg.Server.Addr = ":8080"
 	}
+	if cfg.Server.ReadTimeout == 0 {
+		cfg.Server.ReadTimeout = 30 * time.Second
+	}
+	if cfg.Server.WriteTimeout == 0 {
+		cfg.Server.WriteTimeout = 60 * time.Second
+	}
+	if cfg.Server.IdleTimeout == 0 {
+		cfg.Server.IdleTimeout = 120 * time.Second
+	}
 	if len(cfg.Etcd.Endpoints) == 0 {
 		return nil, fmt.Errorf("etcd.endpoints is required in config")
 	}
@@ -184,7 +193,7 @@ func Load(path string) (*AppConfig, error) {
 
 	// 校验 JWT secret（必须通过环境变量注入，不允许空值）
 	if len(cfg.Jwt.Secret) < 32 {
-		return nil, fmt.Errorf("jwt.secret must be at least 32 characters and set via JWT_SECRET env var (current: %d)", len(cfg.Jwt.Secret))
+		return nil, fmt.Errorf("jwt.secret must be at least 32 characters and set via JWT_SECRET env var")
 	}
 
 	// Redis 密码为空时记录警告（本地开发可能不设密码，生产环境应通过 REDIS_PASSWORD 注入）
