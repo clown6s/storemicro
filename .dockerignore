@@ -1,0 +1,11 @@
+.git
+.idea
+*.env
+*.env.*
+!.env.example
+third_party/
+README.md
+logs/
+*.log
+*.exe
+*.test

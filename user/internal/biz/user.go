@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"sync"
 
 	"user/internal/pkg/jwt"
 	"user/internal/pkg/redis"
@@ -62,15 +63,20 @@ var (
 )
 
 // [C3] 用于 timing-safe login 的 dummy bcrypt hash（cost=10, 随机 salt）
-// 每次启动时预计算，登录失败时用这个 hash 做 CompareHashAndPassword 均衡耗时
+// 使用 lazy init 替代 init()，避免 init panic 无法被调用方捕获
 var dummyHash []byte
+var dummyHashOnce sync.Once
+var dummyHashErr error
 
-func init() {
-	var err error
-	dummyHash, err = bcrypt.GenerateFromPassword([]byte("dummy-timing-safe-hash"), bcrypt.DefaultCost)
-	if err != nil {
-		panic("failed to generate dummy bcrypt hash for timing-safe login: " + err.Error())
-	}
+// getDummyHash 延迟生成 dummy hash（仅在首次 Login 时调用）
+func getDummyHash() []byte {
+	dummyHashOnce.Do(func() {
+		dummyHash, dummyHashErr = bcrypt.GenerateFromPassword([]byte("dummy-timing-safe-hash"), bcrypt.DefaultCost)
+		if dummyHashErr != nil {
+			zap.L().Error("failed to generate dummy bcrypt hash for timing-safe login", zap.Error(dummyHashErr))
+		}
+	})
+	return dummyHash
 }
 
 // User 领域模型（对应数据库 user 表全部字段）
@@ -95,7 +101,7 @@ type User struct {
 type UserRepo interface {
 	Get(ctx context.Context, id int64) (*User, error)
 	GetByPhone(ctx context.Context, phone string) (*User, error)
-	List(ctx context.Context, page, pageSize int32, phone, name string) ([]*User, int64, error)
+	List(ctx context.Context, page, pageSize int32, phone, name, sortBy, sortOrder string) ([]*User, int64, error)
 	Update(ctx context.Context, user *User) error
 	UpdateTx(ctx context.Context, user *User) error // 事务更新（含唯一性检查）
 	Delete(ctx context.Context, id int64) error
@@ -196,6 +202,9 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 	if phone == "" {
 		return "", nil, ErrPhoneRequired
 	}
+	if !phoneRegex.MatchString(phone) {
+		return "", nil, ErrInvalidPhone
+	}
 	if password == "" {
 		return "", nil, ErrPasswordRequired
 	}
@@ -205,7 +214,9 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			// [C3] timing-safe: 用户不存在时对 dummy hash 做 bcrypt 比较，防止通过响应时间差异枚举手机号
-			_ = bcrypt.CompareHashAndPassword(dummyHash, []byte(password))
+			if h := getDummyHash(); h != nil {
+				_ = bcrypt.CompareHashAndPassword(h, []byte(password))
+			}
 			return "", nil, ErrWrongCredentials
 		}
 		// 数据库错误，直接返回，不做 dummy 比较（避免在 DB 故障时也产生 bcrypt 延迟）
@@ -263,7 +274,7 @@ func (uc *UserUsecase) Logout(ctx context.Context, token string) error {
 }
 
 // ListUsers 用户列表（分页）
-func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32, phone, name string) ([]*User, int64, error) {
+func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32, phone, name, sortBy, sortOrder string) ([]*User, int64, error) {
 	// 创建自定义埋点 span
 	ctx, span := otel.Tracer("user-service").Start(ctx, "ListUsers",
 		trace.WithAttributes(
@@ -289,7 +300,7 @@ func (uc *UserUsecase) ListUsers(ctx context.Context, page, pageSize int32, phon
 		return nil, 0, ErrNameTooLong
 	}
 
-	users, total, err := uc.repo.List(ctx, page, pageSize, phone, name)
+	users, total, err := uc.repo.List(ctx, page, pageSize, phone, name, sortBy, sortOrder)
 	if err != nil {
 		span.RecordError(err)
 		span.SetStatus(codes.Error, err.Error())
@@ -319,14 +330,36 @@ func (uc *UserUsecase) Update(ctx context.Context, user *User) error {
 	if user.ID <= 0 {
 		return ErrInvalidUserID
 	}
-	// [M10] Gender/Age 校验
+	// Gender 校验：int32 < 0 表示不更新，>= 0 时必须为 0/1/2
 	if user.Gender >= 0 && user.Gender > 2 {
 		return ErrInvalidGender
 	}
+	// Age 校验：int32 < 0 表示不更新，>= 0 时必须 <= 150
 	if user.Age >= 0 && user.Age > 150 {
 		return ErrInvalidAge
 	}
-	// [H7] 邮箱唯一性检查 — 用事务更新
+	// Email 校验（仅在提供了新邮箱时）
+	if user.Email != "" || (user.UpdateFields != nil && user.UpdateFields["email"]) {
+		if len(user.Email) > 254 {
+			return ErrEmailTooLong
+		}
+		if user.Email != "" && !emailRegex.MatchString(user.Email) {
+			return ErrInvalidEmail
+		}
+	}
+	// RealName 长度校验
+	if len(user.RealName) > 50 {
+		return ErrNameTooLong
+	}
+	// Remark 长度校验
+	if len(user.Remark) > 200 {
+		return ErrRemarkTooLong
+	}
+	// Avatar URL 长度校验
+	if len(user.Avatar) > 500 {
+		return ErrAvatarTooLong
+	}
+	// 邮箱唯一性检查 — 用事务更新
 	err := uc.repo.UpdateTx(ctx, user)
 	if err != nil {
 		return err
@@ -335,7 +368,7 @@ func (uc *UserUsecase) Update(ctx context.Context, user *User) error {
 	return nil
 }
 
-// Delete 删除用户
+// Delete 删除用户（软删除 + 清除 Redis 活跃 token）
 func (uc *UserUsecase) Delete(ctx context.Context, id int64) error {
 	if id <= 0 {
 		return ErrInvalidUserID
@@ -343,6 +376,12 @@ func (uc *UserUsecase) Delete(ctx context.Context, id int64) error {
 	err := uc.repo.Delete(ctx, id)
 	if err != nil {
 		return err
+	}
+	// 清除该用户的所有活跃 token，防止已删除用户继续使用旧 token
+	if invalidateErr := uc.redis.InvalidateUserTokens(ctx, id); invalidateErr != nil {
+		zap.L().Error("delete: failed to invalidate user tokens",
+			zap.Int64("id", id), zap.Error(invalidateErr))
+		// token 清理失败不阻塞删除操作（token 会在过期后自动失效）
 	}
 	zap.L().Info("user deleted", zap.Int64("id", id))
 	return nil

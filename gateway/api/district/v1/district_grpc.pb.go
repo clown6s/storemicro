@@ -2,7 +2,10 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             v7.34.1
-// source: api/district/v1/district.proto
+// source: district.proto
+
+// v1 — 行政区划服务 API（稳定版）
+// WARNING: 此文件与 district/api/district/v1/district.proto 保持同步，修改时需同步更新两处
 
 package districtv1
 
@@ -117,5 +120,5 @@ var District_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "api/district/v1/district.proto",
+	Metadata: "district.proto",
 }

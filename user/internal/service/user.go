@@ -40,7 +40,6 @@ func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*use
 		return nil, s.mapError(err)
 	}
 	return &userv1.GetUserResp{
-		Code:    200,
 		Message: "success",
 		Data:    s.toUserInfo(user),
 	}, nil
@@ -68,7 +67,6 @@ func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*u
 	}
 
 	return &userv1.RegisterResp{
-		Code:    200,
 		Message: "registered",
 	}, nil
 }
@@ -84,7 +82,6 @@ func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.
 	}
 
 	return &userv1.LoginResp{
-		Code:    200,
 		Message: "success",
 		Token:   token,
 		Data:    s.toUserInfo(user),
@@ -101,7 +98,6 @@ func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv
 	}
 
 	return &userv1.LogoutResp{
-		Code:    200,
 		Message: "logged out",
 	}, nil
 }
@@ -115,7 +111,7 @@ func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (
 		zap.String("name", req.Name),
 	)
 
-	users, total, err := s.uc.ListUsers(ctx, req.Page, req.PageSize, req.Phone, req.Name)
+	users, total, err := s.uc.ListUsers(ctx, req.Page, req.PageSize, req.Phone, req.Name, req.SortBy, req.SortOrder)
 	if err != nil {
 		zap.L().Warn("ListUsers failed", zap.Error(err))
 		return nil, s.mapError(err)
@@ -127,12 +123,60 @@ func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (
 	}
 
 	return &userv1.ListUsersResp{
-		Code:     200,
 		Message:  "success",
 		Data:     list,
 		Total:    total,
 		Page:     req.Page,
 		PageSize: req.PageSize,
+	}, nil
+}
+
+// UpdateUser 更新用户资料
+func (s *UserService) UpdateUser(ctx context.Context, req *userv1.UpdateUserReq) (*userv1.UpdateUserResp, error) {
+	zap.L().Debug("UpdateUser called", zap.Int64("id", req.Id))
+
+	user := &biz.User{
+		ID:       req.Id,
+		Email:    req.Email,
+		RealName: req.RealName,
+		Avatar:   req.Avatar,
+		Gender:   req.Gender,
+		Age:      req.Age,
+		Remark:   req.Remark,
+	}
+	// 构建 UpdateFields 标记需要强制清空的字段
+	if len(req.ForceClearFields) > 0 {
+		user.UpdateFields = make(map[string]bool, len(req.ForceClearFields))
+		for _, f := range req.ForceClearFields {
+			user.UpdateFields[f] = true
+		}
+	}
+
+	if err := s.uc.Update(ctx, user); err != nil {
+		zap.L().Warn("UpdateUser failed", zap.Int64("id", req.Id), zap.Error(err))
+		return nil, s.mapError(err)
+	}
+
+	return &userv1.UpdateUserResp{
+		Message: "updated",
+	}, nil
+}
+
+// DeleteUser 删除用户（软删除）
+func (s *UserService) DeleteUser(ctx context.Context, req *userv1.DeleteUserReq) (*userv1.DeleteUserResp, error) {
+	zap.L().Debug("DeleteUser called", zap.Int64("id", req.Id))
+
+	if req.Id <= 0 {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid user id: %d", req.Id)
+	}
+
+	if err := s.uc.Delete(ctx, req.Id); err != nil {
+		zap.L().Warn("DeleteUser failed", zap.Int64("id", req.Id), zap.Error(err))
+		return nil, s.mapError(err)
+	}
+
+	return &userv1.DeleteUserResp{
+		Message: "deleted",
 	}, nil
 }
 
@@ -180,6 +224,7 @@ func (s *UserService) mapError(err error) error {
 		errors.Is(err, biz.ErrRemarkTooLong),
 		errors.Is(err, biz.ErrAvatarTooLong),
 		errors.Is(err, biz.ErrEmailTooLong),
+		errors.Is(err, biz.ErrPasswordNoSpecial),
 		errors.Is(err, biz.ErrInvalidGender),
 		errors.Is(err, biz.ErrInvalidAge):
 		return status.Error(codes.InvalidArgument, err.Error())

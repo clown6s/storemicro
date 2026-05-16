@@ -224,8 +224,12 @@ func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *htt
 		w.WriteHeader(code)
 		_, _ = w.Write(b)
 	})
-	// Prometheus metrics 端点（可选 Bearer token 认证）
-	metricsHandler := http.Handler(promhttp.Handler())
+	// Prometheus metrics 端点（必须配置 METRICS_PASSWORD 才启用，未配置时返回 401）
+	var metricsHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"code":401,"message":"metrics endpoint requires METRICS_PASSWORD env"}`))
+	})
 	if metricsPassword := os.Getenv("METRICS_PASSWORD"); metricsPassword != "" {
 		metricsHandler = pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword)
 	}

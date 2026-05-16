@@ -61,6 +61,8 @@ district_tree AS (
 SELECT id, parent_adcode, adcode, name, level, center FROM district_tree`
 		args = append(args, adCode)
 	} else {
+		// LIMIT 10000: 中国行政区划总数约 3000+，此值留有充足余量覆盖未来新增
+		// 若数据量持续增长，建议改为流式处理或分页接口
 		query = `SELECT id, parent_adcode, adcode, name, level, center FROM district WHERE level != 'country' ORDER BY adcode LIMIT 10000`
 	}
 

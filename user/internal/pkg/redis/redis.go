@@ -105,6 +105,24 @@ func (r *Redis) Ping(ctx context.Context) error {
 	return r.client.Ping(ctx).Err()
 }
 
+// InvalidateUserTokens 删除用户所有活跃 token（用户删除/禁用时使用）
+// 通过反向映射 user_token:{userID} 找到当前 token，然后原子删除双向映射
+func (r *Redis) InvalidateUserTokens(ctx context.Context, userID int64) error {
+	userTokenKey := fmt.Sprintf("storemicro:user_token:%d", userID)
+
+	// Lua 脚本：原子读取并删除
+	invalidateScript := redis.NewScript(`
+local token = redis.call('GET', KEYS[1])
+if token and token ~= '' then
+	redis.call('DEL', 'storemicro:token:' .. token)
+end
+redis.call('DEL', KEYS[1])
+return 1
+`)
+	_, err := invalidateScript.Run(ctx, r.client, []string{userTokenKey}).Result()
+	return err
+}
+
 // Close 关闭 Redis 连接
 func (r *Redis) Close() error {
 	return r.client.Close()

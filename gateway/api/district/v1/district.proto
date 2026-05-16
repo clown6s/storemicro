@@ -1,5 +1,7 @@
 syntax = "proto3";
 
+// v1 — 行政区划服务 API（稳定版）
+// WARNING: 此文件与 district/api/district/v1/district.proto 保持同步，修改时需同步更新两处
 package api.district.v1;
 
 option go_package = "district/api/district/v1;districtv1";
@@ -16,12 +18,14 @@ service District {
 
 message GetProvinceTreeReq {
   string adCode = 1;
+  reserved 2 to 99;
 }
 
 message GetProvinceTreeResp {
   uint32 code = 1;
   string message = 2;
   repeated DistrictTree data = 3;
+  reserved 4 to 99;
 }
 
 message DistrictTree {
@@ -32,4 +36,5 @@ message DistrictTree {
   string level = 5;
   string center = 6;
   repeated DistrictTree children = 7;
+  reserved 8 to 99;
 }

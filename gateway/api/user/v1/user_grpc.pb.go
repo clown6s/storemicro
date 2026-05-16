@@ -4,6 +4,9 @@
 // - protoc             v7.34.1
 // source: user.proto
 
+// v1 — 用户服务 API（稳定版）
+// WARNING: 此文件与 user/api/user/v1/user.proto 保持同步，修改时需同步更新两处
+
 package userv1
 
 import (
@@ -19,11 +22,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	User_GetUser_FullMethodName   = "/api.user.v1.User/GetUser"
-	User_Register_FullMethodName  = "/api.user.v1.User/Register"
-	User_Login_FullMethodName     = "/api.user.v1.User/Login"
-	User_ListUsers_FullMethodName = "/api.user.v1.User/ListUsers"
-	User_Logout_FullMethodName    = "/api.user.v1.User/Logout"
+	User_GetUser_FullMethodName    = "/api.user.v1.User/GetUser"
+	User_Register_FullMethodName   = "/api.user.v1.User/Register"
+	User_Login_FullMethodName      = "/api.user.v1.User/Login"
+	User_ListUsers_FullMethodName  = "/api.user.v1.User/ListUsers"
+	User_Logout_FullMethodName     = "/api.user.v1.User/Logout"
+	User_UpdateUser_FullMethodName = "/api.user.v1.User/UpdateUser"
+	User_DeleteUser_FullMethodName = "/api.user.v1.User/DeleteUser"
 )
 
 // UserClient is the client API for User service.
@@ -39,6 +44,10 @@ type UserClient interface {
 	ListUsers(ctx context.Context, in *ListUsersReq, opts ...grpc.CallOption) (*ListUsersResp, error)
 	// 用户登出
 	Logout(ctx context.Context, in *LogoutReq, opts ...grpc.CallOption) (*LogoutResp, error)
+	// 更新用户资料
+	UpdateUser(ctx context.Context, in *UpdateUserReq, opts ...grpc.CallOption) (*UpdateUserResp, error)
+	// 删除用户（软删除）
+	DeleteUser(ctx context.Context, in *DeleteUserReq, opts ...grpc.CallOption) (*DeleteUserResp, error)
 }
 
 type userClient struct {
@@ -99,6 +108,26 @@ func (c *userClient) Logout(ctx context.Context, in *LogoutReq, opts ...grpc.Cal
 	return out, nil
 }
 
+func (c *userClient) UpdateUser(ctx context.Context, in *UpdateUserReq, opts ...grpc.CallOption) (*UpdateUserResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UpdateUserResp)
+	err := c.cc.Invoke(ctx, User_UpdateUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userClient) DeleteUser(ctx context.Context, in *DeleteUserReq, opts ...grpc.CallOption) (*DeleteUserResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(DeleteUserResp)
+	err := c.cc.Invoke(ctx, User_DeleteUser_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // UserServer is the server API for User service.
 // All implementations must embed UnimplementedUserServer
 // for forward compatibility.
@@ -112,6 +141,10 @@ type UserServer interface {
 	ListUsers(context.Context, *ListUsersReq) (*ListUsersResp, error)
 	// 用户登出
 	Logout(context.Context, *LogoutReq) (*LogoutResp, error)
+	// 更新用户资料
+	UpdateUser(context.Context, *UpdateUserReq) (*UpdateUserResp, error)
+	// 删除用户（软删除）
+	DeleteUser(context.Context, *DeleteUserReq) (*DeleteUserResp, error)
 	mustEmbedUnimplementedUserServer()
 }
 
@@ -136,6 +169,12 @@ func (UnimplementedUserServer) ListUsers(context.Context, *ListUsersReq) (*ListU
 }
 func (UnimplementedUserServer) Logout(context.Context, *LogoutReq) (*LogoutResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method Logout not implemented")
+}
+func (UnimplementedUserServer) UpdateUser(context.Context, *UpdateUserReq) (*UpdateUserResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method UpdateUser not implemented")
+}
+func (UnimplementedUserServer) DeleteUser(context.Context, *DeleteUserReq) (*DeleteUserResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteUser not implemented")
 }
 func (UnimplementedUserServer) mustEmbedUnimplementedUserServer() {}
 func (UnimplementedUserServer) testEmbeddedByValue()              {}
@@ -248,6 +287,42 @@ func _User_Logout_Handler(srv interface{}, ctx context.Context, dec func(interfa
 	return interceptor(ctx, in, info, handler)
 }
 
+func _User_UpdateUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateUserReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServer).UpdateUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: User_UpdateUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServer).UpdateUser(ctx, req.(*UpdateUserReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _User_DeleteUser_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteUserReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServer).DeleteUser(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: User_DeleteUser_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServer).DeleteUser(ctx, req.(*DeleteUserReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // User_ServiceDesc is the grpc.ServiceDesc for User service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -274,6 +349,14 @@ var User_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Logout",
 			Handler:    _User_Logout_Handler,
+		},
+		{
+			MethodName: "UpdateUser",
+			Handler:    _User_UpdateUser_Handler,
+		},
+		{
+			MethodName: "DeleteUser",
+			Handler:    _User_DeleteUser_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

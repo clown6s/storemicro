@@ -69,7 +69,7 @@ func (r *userRepo) GetByPhone(ctx context.Context, phone string) (*biz.User, err
 	return user, nil
 }
 
-func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name string) ([]*biz.User, int64, error) {
+func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, sortBy, sortOrder string) ([]*biz.User, int64, error) {
 	zap.L().Debug("userRepo.List",
 		zap.Int32("page", page), zap.Int32("pageSize", pageSize),
 		zap.String("phone", pkgstr.MaskPhone(phone)), zap.String("name", name),
@@ -113,13 +113,29 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 		return nil, 0, fmt.Errorf("count users failed: %w", err)
 	}
 
+	// 排序参数白名单校验（防止 SQL 注入）
+	allowedSortBy := map[string]string{
+		"id":          "id",
+		"create_time": "create_time",
+		"update_time": "update_time",
+	}
+	sortCol, ok := allowedSortBy[sortBy]
+	if !ok {
+		sortCol = "id" // 默认按 id 排序
+	}
+	sortDir := "DESC"
+	if strings.EqualFold(sortOrder, "asc") {
+		sortDir = "ASC"
+	}
+	orderBy := sortCol + " " + sortDir
+
 	// 分页查询（int64 防止溢出）
 	offset := int64(page-1) * int64(pageSize)
 	querySQL := fmt.Sprintf(
 		`SELECT id, COALESCE(real_name,''), COALESCE(avatar,''), gender, COALESCE(age,0),
 		        phone, COALESCE(email,''), create_time, update_time, COALESCE(remark,'')
 		 FROM user WHERE %s
-		 ORDER BY id DESC LIMIT ? OFFSET ?`, where,
+		 ORDER BY %s LIMIT ? OFFSET ?`, where, orderBy,
 	)
 	queryArgs := append(args, pageSize, offset)
 
@@ -143,7 +159,12 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name s
 		users = append(users, user)
 	}
 
-	return users, total, rows.Err()
+	if err := rows.Err(); err != nil {
+		zap.L().Error("userRepo.List rows error", zap.Error(err))
+		return nil, 0, fmt.Errorf("list users rows error: %w", err)
+	}
+
+	return users, total, nil
 }
 
 // Update 已废弃：请使用 UpdateTx（包含邮箱唯一性检查的事务更新）
@@ -305,13 +326,13 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM user WHERE phone = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Phone,
 	); err != nil {
-		zap.L().Warn("register: cleanup soft-deleted phone records failed", zap.String("phone", pkgstr.MaskPhone(user.Phone)), zap.Error(err))
+		return fmt.Errorf("cleanup soft-deleted phone records failed: %w", err)
 	}
 	if user.Email != "" {
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM user WHERE email = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Email,
 		); err != nil {
-			zap.L().Warn("register: cleanup soft-deleted email records failed", zap.Error(err))
+			return fmt.Errorf("cleanup soft-deleted email records failed: %w", err)
 		}
 	}
 

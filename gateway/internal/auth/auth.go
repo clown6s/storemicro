@@ -90,12 +90,14 @@ func IsAllowedOrigin(origin string, allowed map[string]struct{}) bool {
 	}
 
 	// 通配符子域名匹配 (*.example.com)
+	// 校验域名边界：确保 origin 的域名部分以 "." + baseDomain 结尾，防止 notevil.com 匹配 evil.com
 	for a := range allowed {
 		if strings.HasPrefix(a, "https://") {
 			domain := strings.TrimPrefix(a, "https://")
 			if strings.HasPrefix(domain, "*.") {
 				baseDomain := domain[2:]
-				if strings.HasSuffix(origin, baseDomain) && origin != baseDomain {
+				// 精确匹配 baseDomain 本身，或子域名以 .baseDomain 结尾
+				if origin == "https://"+baseDomain || strings.HasSuffix(origin, "."+baseDomain) {
 					return true
 				}
 			}
@@ -104,7 +106,7 @@ func IsAllowedOrigin(origin string, allowed map[string]struct{}) bool {
 			domain := strings.TrimPrefix(a, "http://")
 			if strings.HasPrefix(domain, "*.") {
 				baseDomain := domain[2:]
-				if strings.HasSuffix(origin, baseDomain) && origin != baseDomain {
+				if origin == "http://"+baseDomain || strings.HasSuffix(origin, "."+baseDomain) {
 					return true
 				}
 			}

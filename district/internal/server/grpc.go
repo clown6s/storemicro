@@ -4,6 +4,7 @@ import (
 	"time"
 
 	sgrpc "google.golang.org/grpc"
+	"google.golang.org/grpc/keepalive"
 
 	districtv1 "district/api/district/v1"
 	"district/internal/conf"
@@ -34,6 +35,12 @@ func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.DistrictServi
 		kratosgrpc.Timeout(timeout),
 		// 限制接收消息大小（默认 4MB），防止超大请求导致 OOM
 		kratosgrpc.Options(sgrpc.MaxRecvMsgSize(4 << 20)),
+		// 限制发送消息大小（默认 unlimited），防止超大响应导致客户端 OOM
+		kratosgrpc.Options(sgrpc.MaxSendMsgSize(16 << 20)),
+		// 连接保活：10 分钟最大连接年龄，防止连接泄漏
+		kratosgrpc.Options(sgrpc.KeepaliveParams(keepalive.ServerParameters{
+			MaxConnectionAge: 10 * time.Minute,
+		})),
 		kratosgrpc.Middleware(
 			recovery.Recovery(),
 			tracing.Server(),
