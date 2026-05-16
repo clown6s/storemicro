@@ -170,12 +170,6 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, 
 	return users, total, nil
 }
 
-// Update 已废弃：请使用 UpdateTx（包含邮箱唯一性检查的事务更新）
-// 保留此方法以保持接口兼容，内部直接调用 UpdateTx
-func (r *userRepo) Update(ctx context.Context, user *biz.User) error {
-	return r.UpdateTx(ctx, user)
-}
-
 // UpdateTx 事务更新：动态 SET + 邮箱唯一性检查原子操作 [H7]
 func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 	tx, err := r.data.db.BeginTx(ctx, nil)

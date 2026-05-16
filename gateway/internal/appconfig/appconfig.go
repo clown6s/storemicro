@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	pkgenv "github.com/storemicro/pkg/envexpand"
@@ -155,14 +156,14 @@ func Load(path string) (*AppConfig, error) {
 
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("reading config file %s: %w", path, err)
 	}
 
 	// 展开环境变量 ${VAR:default} 语法
 	expanded := pkgenv.ExpandEnv(string(data))
 
 	if err := yaml.Unmarshal([]byte(expanded), cfg); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unmarshaling config: %w", err)
 	}
 
 	// 设置默认值
@@ -178,6 +179,15 @@ func Load(path string) (*AppConfig, error) {
 	if cfg.Server.IdleTimeout == 0 {
 		cfg.Server.IdleTimeout = 120 * time.Second
 	}
+
+	// 校验 etcd endpoints（过滤空字符串，防止 ${VAR} 展开为 "" 绕过 len 检查）
+	validEndpoints := make([]string, 0, len(cfg.Etcd.Endpoints))
+	for _, ep := range cfg.Etcd.Endpoints {
+		if strings.TrimSpace(ep) != "" {
+			validEndpoints = append(validEndpoints, strings.TrimSpace(ep))
+		}
+	}
+	cfg.Etcd.Endpoints = validEndpoints
 	if len(cfg.Etcd.Endpoints) == 0 {
 		return nil, fmt.Errorf("etcd.endpoints is required in config")
 	}
@@ -186,6 +196,10 @@ func Load(path string) (*AppConfig, error) {
 	}
 	if cfg.Redis.Addr == "" {
 		return nil, fmt.Errorf("redis.addr is required in config")
+	}
+	// 校验 Redis Db 范围 (0-15)
+	if cfg.Redis.Db < 0 || cfg.Redis.Db > 15 {
+		return nil, fmt.Errorf("redis.db must be between 0 and 15, got %d", cfg.Redis.Db)
 	}
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
@@ -201,7 +215,43 @@ func Load(path string) (*AppConfig, error) {
 		fmt.Fprintln(os.Stderr, "[WARN] redis.password is empty, set REDIS_PASSWORD env var for production")
 	}
 
+	// 校验 gRPC 客户端配置
+	if err := validateGrpcClient(&cfg.GrpcClient); err != nil {
+		return nil, err
+	}
+
 	return cfg, nil
+}
+
+// validateGrpcClient 校验 gRPC 客户端配置项
+func validateGrpcClient(c *GrpcClientConfig) error {
+	// #16: LoadBalancingPolicy 白名单校验
+	switch c.LoadBalancingPolicy {
+	case "round_robin", "pick_first":
+		// 合法值
+	default:
+		return fmt.Errorf("grpc_client.load_balancing_policy must be 'round_robin' or 'pick_first', got %q", c.LoadBalancingPolicy)
+	}
+
+	// #17: BackoffMultiplier 必须大于 0
+	if c.Retry.BackoffMultiplier <= 0 {
+		return fmt.Errorf("grpc_client.retry.backoff_multiplier must be > 0, got %.2f", c.Retry.BackoffMultiplier)
+	}
+
+	// #17: InitialBackoff 不能超过 MaxBackoff
+	if c.Retry.InitialBackoff > c.Retry.MaxBackoff {
+		return fmt.Errorf("grpc_client.retry.initial_backoff (%v) must not exceed max_backoff (%v)", c.Retry.InitialBackoff, c.Retry.MaxBackoff)
+	}
+
+	// #7: MaxRecvMsgSize / MaxSendMsgSize 必须在合理范围 (1-100 MB)
+	if c.MaxRecvMsgSize <= 0 || c.MaxRecvMsgSize > 100 {
+		return fmt.Errorf("grpc_client.max_recv_msg_size must be between 1 and 100 MB, got %d", c.MaxRecvMsgSize)
+	}
+	if c.MaxSendMsgSize <= 0 || c.MaxSendMsgSize > 100 {
+		return fmt.Errorf("grpc_client.max_send_msg_size must be between 1 and 100 MB, got %d", c.MaxSendMsgSize)
+	}
+
+	return nil
 }
 
 // grpcDuration 将 time.Duration 转为 gRPC service config 要求的秒级格式（如 "0.1s"、"1s"）
@@ -210,7 +260,7 @@ func grpcDuration(d time.Duration) string {
 }
 
 // BuildServiceConfig 将 GrpcClientConfig 转为 gRPC WithDefaultServiceConfig 所需的 JSON 字符串
-func (c *GrpcClientConfig) BuildServiceConfig() string {
+func (c *GrpcClientConfig) BuildServiceConfig() (string, error) {
 	type methodRetry struct {
 		MaxAttempts          int      `json:"maxAttempts"`
 		InitialBackoff       string   `json:"initialBackoff"`
@@ -264,7 +314,7 @@ func (c *GrpcClientConfig) BuildServiceConfig() string {
 
 	b, err := json.Marshal(sc)
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("marshal gRPC service config: %w", err)
 	}
-	return string(b)
+	return string(b), nil
 }

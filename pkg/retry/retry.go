@@ -63,6 +63,11 @@ func Do(ctx context.Context, cfg Config, name string, fn func(ctx context.Contex
 			return nil
 		}
 
+		// fn 返回后立即检查 context 取消，避免无意义的等待
+		if ctx.Err() != nil {
+			return fmt.Errorf("%s: context cancelled after attempt %d: %w", name, attempt, ctx.Err())
+		}
+
 		// 最后一次不需要等
 		if attempt == cfg.MaxAttempts {
 			break

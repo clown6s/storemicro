@@ -202,6 +202,15 @@ func retryKeepAliveOnce(etcdClient *clientv3.Client, key string) bool {
 		}
 
 		readyMu.Lock()
+		// 重置 node 引用，防止时钟漂移后使用陈旧节点生成碰撞 ID
+		newNode, nodeErr := sf.NewNode(NodeID)
+		if nodeErr != nil {
+			zap.L().Error("snowflake: failed to recreate node after lease re-acquire", zap.Error(nodeErr))
+			readyMu.Unlock()
+			_, _ = etcdClient.Revoke(ctx, lease.ID)
+			continue
+		}
+		node = newNode
 		nodeReady = true
 		readyMu.Unlock()
 

@@ -17,6 +17,7 @@ import (
 	pkgtracing "github.com/storemicro/pkg/tracing"
 	pkglog "github.com/storemicro/pkg/zaplogger"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/connectivity"
 
 	"gateway/internal/appconfig"
 	gwproxy "gateway/internal/proxy"
@@ -139,6 +140,21 @@ func main() {
 		pkglog.L().Error("gateway forced shutdown", zap.Error(err))
 	}
 
+	// #15: 等待 in-flight gRPC 请求 drain（最多 5 秒）
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer drainCancel()
+	for _, conn := range proxy.Conns() {
+		select {
+		case <-drainCtx.Done():
+			pkglog.L().Warn("gRPC drain timed out, forcing close")
+			goto closeProxy
+		default:
+		}
+		if !conn.WaitForStateChange(drainCtx, connectivity.Ready) {
+			continue
+		}
+	}
+closeProxy:
 	proxy.Close()
 
 	pkglog.L().Info("gateway stopped")
@@ -223,10 +239,24 @@ func newRootMux(proxy *gwproxy.Proxy, metricsPassword string) http.Handler {
 		mux.Handle("/metrics", pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword))
 	}
 
-	// 其余所有请求走 gateway proxy
+	// 其余所有请求走 gateway proxy（proxy 内部已有 panic recovery）
 	mux.Handle("/", proxy)
 
-	return mux
+	// LOW: 为根 mux 整体包裹 panic recovery，覆盖 healthz/readyz/metrics
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				pkglog.L().Error("panic recovered in root mux",
+					zap.Any("error", rec),
+					zap.Stack("stack"),
+				)
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.WriteHeader(http.StatusInternalServerError)
+				_, _ = w.Write([]byte(`{"code":500,"message":"internal server error"}`))
+			}
+		}()
+		mux.ServeHTTP(w, r)
+	})
 }
 
 // limitRequestBody 限制请求体大小，防止 OOM 攻击

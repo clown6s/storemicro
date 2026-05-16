@@ -106,7 +106,6 @@ type UserRepo interface {
 	Get(ctx context.Context, id int64) (*User, error)
 	GetByPhone(ctx context.Context, phone string) (*User, error)
 	List(ctx context.Context, page, pageSize int32, phone, name, sortBy, sortOrder string) ([]*User, int64, error)
-	Update(ctx context.Context, user *User) error
 	UpdateTx(ctx context.Context, user *User) error // 事务更新（含唯一性检查）
 	Delete(ctx context.Context, id int64) error
 	RegisterTx(ctx context.Context, user *User) error // 事务注册（含唯一性检查）
@@ -122,6 +121,40 @@ type UserUsecase struct {
 // NewUserUsecase 创建用户用例
 func NewUserUsecase(repo UserRepo, j *jwt.JWT, r *redis.Redis) *UserUsecase {
 	return &UserUsecase{repo: repo, jwt: j, redis: r}
+}
+
+// validateUserFields 校验用户字段（Register 和 Update 共享），isRegister=true 时执行全量校验
+func validateUserFields(user *User, isRegister bool) error {
+	if user.Email != "" || (user.UpdateFields != nil && user.UpdateFields["email"]) {
+		if len(user.Email) > 254 {
+			return ErrEmailTooLong
+		}
+		if user.Email != "" && !emailRegex.MatchString(user.Email) {
+			return ErrInvalidEmail
+		}
+	}
+	if user.Gender >= 0 && user.Gender > 2 {
+		return ErrInvalidGender
+	}
+	if user.Age >= 0 && user.Age > 150 {
+		return ErrInvalidAge
+	}
+	if len(user.RealName) > 0 && len(user.RealName) < 2 {
+		return ErrNameTooShort
+	}
+	if len(user.RealName) > 50 {
+		return ErrNameTooLong
+	}
+	if len(user.Remark) > 200 {
+		return ErrRemarkTooLong
+	}
+	if len(user.Avatar) > 500 {
+		return ErrAvatarTooLong
+	}
+	if user.Avatar != "" && !avatarRegex.MatchString(user.Avatar) {
+		return ErrInvalidAvatar
+	}
+	return nil
 }
 
 // Register 用户注册（使用事务保证原子性）
@@ -156,36 +189,10 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	if !hasSpecial.MatchString(user.Password) {
 		return ErrPasswordNoSpecial
 	}
-	if user.Email != "" {
-		if len(user.Email) > 254 {
-			return ErrEmailTooLong
-		}
-		if !emailRegex.MatchString(user.Email) {
-			return ErrInvalidEmail
-		}
-	}
-	// [M10] Gender 校验：限定 0/1/2
-	if user.Gender < 0 || user.Gender > 2 {
-		return ErrInvalidGender
-	}
-	// [M10] Age 校验：限定 0-150
-	if user.Age < 0 || user.Age > 150 {
-		return ErrInvalidAge
-	}
-	if len(user.RealName) > 0 && len(user.RealName) < 2 {
-		return ErrNameTooShort
-	}
-	if len(user.RealName) > 50 {
-		return ErrNameTooLong
-	}
-	if len(user.Remark) > 200 {
-		return ErrRemarkTooLong
-	}
-	if len(user.Avatar) > 500 {
-		return ErrAvatarTooLong
-	}
-	if user.Avatar != "" && !avatarRegex.MatchString(user.Avatar) {
-		return ErrInvalidAvatar
+
+	// 共享字段校验（Register 使用全量校验）
+	if err := validateUserFields(user, true); err != nil {
+		return err
 	}
 
 	// bcrypt 加密密码
@@ -346,35 +353,12 @@ func (uc *UserUsecase) Update(ctx context.Context, user *User) error {
 	if user.ID <= 0 {
 		return ErrInvalidUserID
 	}
-	// Gender 校验：int32 < 0 表示不更新，>= 0 时必须为 0/1/2
-	if user.Gender >= 0 && user.Gender > 2 {
-		return ErrInvalidGender
+
+	// 共享字段校验（与 Register 一致，含 avatar URL 格式正则 + real_name 最短 2 字符）
+	if err := validateUserFields(user, false); err != nil {
+		return err
 	}
-	// Age 校验：int32 < 0 表示不更新，>= 0 时必须 <= 150
-	if user.Age >= 0 && user.Age > 150 {
-		return ErrInvalidAge
-	}
-	// Email 校验（仅在提供了新邮箱时）
-	if user.Email != "" || (user.UpdateFields != nil && user.UpdateFields["email"]) {
-		if len(user.Email) > 254 {
-			return ErrEmailTooLong
-		}
-		if user.Email != "" && !emailRegex.MatchString(user.Email) {
-			return ErrInvalidEmail
-		}
-	}
-	// RealName 长度校验
-	if len(user.RealName) > 50 {
-		return ErrNameTooLong
-	}
-	// Remark 长度校验
-	if len(user.Remark) > 200 {
-		return ErrRemarkTooLong
-	}
-	// Avatar URL 长度校验
-	if len(user.Avatar) > 500 {
-		return ErrAvatarTooLong
-	}
+
 	// 邮箱唯一性检查 — 用事务更新
 	err := uc.repo.UpdateTx(ctx, user)
 	if err != nil {

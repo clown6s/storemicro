@@ -42,6 +42,7 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 		if req.AdCode == "" {
 			// 全量查询结果为空，返回 OK + 空数组
 			return &districtv1.GetProvinceTreeResp{
+				Code:    200,
 				Message: "success",
 				Data:    []*districtv1.DistrictTree{},
 			}, nil
@@ -51,6 +52,7 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 
 	tree := buildDistrictTree(districts)
 	return &districtv1.GetProvinceTreeResp{
+		Code:    200,
 		Message: "success",
 		Data:    tree,
 	}, nil

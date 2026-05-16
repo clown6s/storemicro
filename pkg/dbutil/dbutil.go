@@ -40,15 +40,16 @@ func Connect(driver, dsn string, pool DefaultPoolConfig) (*sql.DB, error) {
 		return nil, fmt.Errorf("open database failed: %w", err)
 	}
 
-	// 应用连接池配置
+	// 应用默认值（使用 DefaultPool 作为基准，覆盖调用方未设置的零值）
+	defaults := DefaultPool()
 	if pool.MaxOpenConns <= 0 {
-		pool.MaxOpenConns = 100
+		pool.MaxOpenConns = defaults.MaxOpenConns
 	}
 	if pool.MaxIdleConns <= 0 {
-		pool.MaxIdleConns = 25
+		pool.MaxIdleConns = defaults.MaxIdleConns
 	}
 	if pool.ConnMaxLifetime <= 0 {
-		pool.ConnMaxLifetime = 3600
+		pool.ConnMaxLifetime = defaults.ConnMaxLifetime
 	}
 
 	db.SetMaxOpenConns(pool.MaxOpenConns)

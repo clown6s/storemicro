@@ -10,7 +10,7 @@ build:
 test:
 	go test ./user/... ./district/... ./gateway/... ./pkg/...
 
-# protobuf 代码生成
+# protobuf 代码生成（含 grpc-gateway HTTP 反向代理代码）
 generate:
 	protoc --proto_path=third_party --proto_path=user/api/user/v1 \
 		--go_out=user/api/user/v1 --go_opt=paths=source_relative \
@@ -23,10 +23,12 @@ generate:
 	protoc --proto_path=third_party --proto_path=gateway/api/user/v1 \
 		--go_out=gateway/api/user/v1 --go_opt=paths=source_relative \
 		--go-grpc_out=gateway/api/user/v1 --go-grpc_opt=paths=source_relative \
+		--grpc-gateway_out=gateway/api/user/v1 --grpc-gateway_opt=paths=source_relative \
 		gateway/api/user/v1/user.proto
 	protoc --proto_path=third_party --proto_path=gateway/api/district/v1 \
 		--go_out=gateway/api/district/v1 --go_opt=paths=source_relative \
 		--go-grpc_out=gateway/api/district/v1 --go-grpc_opt=paths=source_relative \
+		--grpc-gateway_out=gateway/api/district/v1 --grpc-gateway_opt=paths=source_relative \
 		gateway/api/district/v1/district.proto
 
 # Wire 依赖注入代码生成

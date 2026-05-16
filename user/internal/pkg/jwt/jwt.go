@@ -34,7 +34,7 @@ func NewJWT(secret string, expireHrs int64) *JWT {
 	return &JWT{
 		secret:    []byte(secret),
 		expireHrs: expireHrs,
-		issuer:    "storemicro",
+		issuer:    "storemicro-auth",
 	}
 }
 

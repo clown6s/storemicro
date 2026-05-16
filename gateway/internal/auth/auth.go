@@ -28,14 +28,24 @@ func RecoverMiddleware(next http.Handler) http.Handler {
 					zap.Any("error", rec),
 					zap.Stack("stack"),
 				)
-				WriteJSON(w, http.StatusInternalServerError, `{"code":500,"message":"internal server error"}`)
+				writeJSON(w, http.StatusInternalServerError, `{"code":500,"message":"internal server error"}`)
 			}
 		}()
 		next.ServeHTTP(w, r)
 	})
 }
 
+// CORSMiddleware 返回 CORS 中间件
+func CORSMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
+	return corsMiddleware(allowOrigins)
+}
+
+// SecurityHeadersMiddleware 返回安全头中间件
 func SecurityHeadersMiddleware(next http.Handler) http.Handler {
+	return securityHeadersMiddleware(next)
+}
+
+func securityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
@@ -49,7 +59,7 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func CORSMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
+func corsMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 	originSet := make(map[string]struct{}, len(allowOrigins))
 	for _, o := range allowOrigins {
 		o = strings.TrimSpace(o)
@@ -64,7 +74,7 @@ func CORSMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			origin := r.Header.Get("Origin")
 			if origin != "" {
-				if IsAllowedOrigin(origin, originSet) {
+				if isAllowedOrigin(origin, originSet) {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
 					w.Header().Add("Vary", "Origin")
 					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
@@ -74,6 +84,11 @@ func CORSMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 				}
 			}
 			if r.Method == http.MethodOptions {
+				// 非匹配 origin 的 OPTIONS 请求返回 403，而非 204
+				if origin != "" && !isAllowedOrigin(origin, originSet) {
+					w.WriteHeader(http.StatusForbidden)
+					return
+				}
 				w.WriteHeader(http.StatusNoContent)
 				return
 			}
@@ -82,8 +97,8 @@ func CORSMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 	}
 }
 
-// IsAllowedOrigin 检查 origin 是否在允许列表中，支持通配符子域名匹配 (*.example.com)
-func IsAllowedOrigin(origin string, allowed map[string]struct{}) bool {
+// isAllowedOrigin 检查 origin 是否在允许列表中，支持通配符子域名匹配 (*.example.com)
+func isAllowedOrigin(origin string, allowed map[string]struct{}) bool {
 	// 精确匹配
 	if _, ok := allowed[origin]; ok {
 		return true
@@ -118,17 +133,17 @@ func IsAllowedOrigin(origin string, allowed map[string]struct{}) bool {
 	return false
 }
 
-// Claims JWT claims
-type Claims struct {
+// claims JWT claims
+type claims struct {
 	UserID int64 `json:"user_id"`
 	jwt.RegisteredClaims
 }
 
-// ContextKey context key 类型
-type ContextKey string
+// contextKey context key 类型
+type contextKey string
 
 // ContextKeyUserID 用户ID context key
-const ContextKeyUserID ContextKey = "user_id"
+const ContextKeyUserID contextKey = "user_id"
 
 // NoAuthRoutes 免认证路由白名单
 var NoAuthRoutes = map[string]struct{}{
@@ -210,14 +225,14 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rawPath := r.URL.Path
 		cleaned := path.Clean(rawPath)
-		route := RouteKey(r.Method, cleaned)
+		route := routeKey(r.Method, cleaned)
 
-		if IsNoAuthRoute(r.Method, rawPath) {
+		if isNoAuthRoute(r.Method, rawPath) {
 			if limiter, ok := rateLimitRoutes[route]; ok {
-				ip := ExtractIP(r, trustedProxies)
+				ip := extractIP(r, trustedProxies)
 				if !limiter.Allow(r.Context(), "storemicro:rl:"+cleaned+":"+ip) {
-					pkglog.L().Warn("rate limited", zap.String("path", cleaned), zap.String("ip", MaskIP(ip)))
-					WriteJSON(w, http.StatusTooManyRequests, `{"code":429,"message":"too many requests"}`)
+					pkglog.L().Warn("rate limited", zap.String("path", cleaned), zap.String("ip", maskIP(ip)))
+					writeJSON(w, http.StatusTooManyRequests, `{"code":429,"message":"too many requests"}`)
 					return
 				}
 			}
@@ -231,7 +246,7 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 				zap.String("path", cleaned),
 				zap.String("remote", r.RemoteAddr),
 			)
-			WriteJSON(w, http.StatusUnauthorized, `{"code":401,"message":"missing token"}`)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"missing token"}`)
 			return
 		}
 
@@ -240,24 +255,36 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			tokenStr = strings.TrimSpace(authHeader[7:])
 		}
 
-		token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
+		// #10: JWT issuer 校验
+		// #11: JWT 显式过期校验
+		token, err := jwt.ParseWithClaims(tokenStr, &claims{}, func(token *jwt.Token) (any, error) {
 			if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 				return nil, jwt.ErrSignatureInvalid
 			}
 			return []byte(secret), nil
-		}, jwt.WithAudience("storemicro-api"))
+		}, jwt.WithAudience("storemicro-api"), jwt.WithIssuer("storemicro-auth"))
 		if err != nil || !token.Valid {
 			pkglog.L().Warn("jwt auth failed: invalid token",
 				zap.String("path", cleaned),
 				zap.Error(err),
 			)
-			WriteJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
 			return
 		}
 
-		claims, ok := token.Claims.(*Claims)
+		c, ok := token.Claims.(*claims)
 		if !ok {
-			WriteJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid claims"}`)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid claims"}`)
+			return
+		}
+
+		// #11: 显式校验 token 过期时间（即使 Redis TTL 兜底也不应接受无 exp 的 token）
+		if c.ExpiresAt == nil || c.ExpiresAt.Before(time.Now()) {
+			pkglog.L().Warn("jwt auth failed: token expired or missing exp",
+				zap.String("path", cleaned),
+				zap.Int64("user_id", c.UserID),
+			)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
 			return
 		}
 
@@ -269,43 +296,48 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		if err == redis.Nil {
 			pkglog.L().Warn("jwt auth failed: token revoked (logged in elsewhere)",
 				zap.String("path", cleaned),
-				zap.Int64("user_id", claims.UserID),
+				zap.Int64("user_id", c.UserID),
 			)
-			WriteJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
 			return
 		} else if err != nil {
 			pkglog.L().Error("redis check token failed, fail-closed",
 				zap.String("path", cleaned),
-				zap.Int64("user_id", claims.UserID),
+				zap.Int64("user_id", c.UserID),
 				zap.Error(err),
 			)
-			WriteJSON(w, http.StatusServiceUnavailable, `{"code":503,"message":"service temporarily unavailable"}`)
+			writeJSON(w, http.StatusServiceUnavailable, `{"code":503,"message":"service temporarily unavailable"}`)
 			return
 		}
 
 		// 校验 Redis 中 token 对应的 userID 与 JWT claims 一致
 		redisUserID, parseErr := strconv.ParseInt(val, 10, 64)
-		if parseErr != nil || redisUserID != claims.UserID {
+		if parseErr != nil || redisUserID != c.UserID {
+			// LOW: 移除原始 Redis value 日志，防止泄露敏感数据
 			pkglog.L().Warn("jwt auth failed: token userID mismatch",
-				zap.Int64("jwt_user_id", claims.UserID),
-				zap.String("redis_value", val),
+				zap.Int64("jwt_user_id", c.UserID),
+				zap.Int64("redis_user_id", redisUserID),
 			)
-			WriteJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), ContextKeyUserID, claims.UserID)
+		ctx := context.WithValue(r.Context(), ContextKeyUserID, c.UserID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
-// RouteKey 生成路由键
-func RouteKey(method, path string) string {
+// routeKey 生成路由键
+func routeKey(method, path string) string {
 	return method + " " + path
 }
 
 // IsNoAuthRoute 检查请求是否在免认证白名单中
 func IsNoAuthRoute(method, rawPath string) bool {
+	return isNoAuthRoute(method, rawPath)
+}
+
+func isNoAuthRoute(method, rawPath string) bool {
 	unescaped, err := url.PathUnescape(rawPath)
 	if err != nil {
 		return false
@@ -315,8 +347,8 @@ func IsNoAuthRoute(method, rawPath string) bool {
 	return allowed
 }
 
-// WriteJSON 写入 JSON 响应
-func WriteJSON(w http.ResponseWriter, code int, body string) {
+// writeJSON 写入 JSON 响应
+func writeJSON(w http.ResponseWriter, code int, body string) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(code)
 	_, _ = w.Write([]byte(body))
@@ -324,6 +356,10 @@ func WriteJSON(w http.ResponseWriter, code int, body string) {
 
 // ExtractIP 从请求中提取客户端 IP（支持可信代理 X-Forwarded-For）
 func ExtractIP(r *http.Request, trustedProxies []string) string {
+	return extractIP(r, trustedProxies)
+}
+
+func extractIP(r *http.Request, trustedProxies []string) string {
 	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
@@ -388,6 +424,10 @@ func isTrustedProxy(ip string, trustedProxies []string) bool {
 
 // MaskIP 脱敏 IP 地址：保留前两个八位组，隐藏后两部分 (GDPR 合规)
 func MaskIP(ip string) string {
+	return maskIP(ip)
+}
+
+func maskIP(ip string) string {
 	parsed := net.ParseIP(ip)
 	if parsed == nil {
 		return "unknown"

@@ -1,17 +1,10 @@
 # grpc-gateway 配置
 #
 # REST 路由由 proto 文件中的 google.api.http 注解驱动，
-# 不再需要手动配置路由端点。
+# 修改路由请在 api/ 下的 proto 文件中更新，然后执行 make generate。
 #
-# 支持的 REST 端点：
-#   POST   /api/v1/user/register  → User/Register
-#   POST   /api/v1/user/login     → User/Login
-#   POST   /api/v1/user/logout    → User/Logout
-#   GET    /api/v1/user/{id}      → User/GetUser
-#   GET    /api/v1/user/list      → User/ListUsers
-#   PUT    /api/v1/user/{id}      → User/UpdateUser
-#   DELETE /api/v1/user/{id}      → User/DeleteUser
-#   GET    /api/v1/district/provinceTree → District/GetProvinceTree
+# 当前注册的服务: user, district
+# 运行 `make generate` 重新生成 gateway 代码。
 
 name: storemicro
 version: v1

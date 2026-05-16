@@ -27,6 +27,9 @@ type Conf struct {
 // InitTracer 初始化 OTLP TracerProvider 并设为全局
 // 返回 shutdown 函数，调用方应在退出时调用以刷新缓冲的 span
 func InitTracer(c Conf) (func(context.Context) error, error) {
+	if c.ServiceName == "" {
+		c.ServiceName = "unknown-service"
+	}
 	if c.SampleRate <= 0 {
 		c.SampleRate = 0.1
 	} else if c.SampleRate > 1 {

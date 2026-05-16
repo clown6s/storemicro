@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"sync/atomic"
 
 	"github.com/go-kratos/kratos/v2/log"
@@ -32,9 +33,9 @@ type Config struct {
 func New(cfg Config) log.Logger {
 	lv := parseLevel(cfg.Level)
 
-	// 选择 encoder：prod 用 JSON，dev 用 Console
+	// 选择 encoder：prod 用 JSON，dev 用 Console（大小写不敏感）
 	var enc zapcore.Encoder
-	if cfg.Mode == "prod" {
+	if strings.EqualFold(cfg.Mode, "prod") {
 		ec := zap.NewProductionEncoderConfig()
 		ec.TimeKey = "ts"
 		ec.EncodeTime = zapcore.ISO8601TimeEncoder

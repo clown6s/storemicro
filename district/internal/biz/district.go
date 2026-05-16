@@ -24,7 +24,6 @@ type District struct {
 	Name         string
 	Level        string
 	Center       string
-	Children     []*District
 }
 
 // DistrictRepo 数据仓库接口

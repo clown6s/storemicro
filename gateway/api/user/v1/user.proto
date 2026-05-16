@@ -34,11 +34,10 @@ service User {
       get: "/api/v1/user/list"
     };
   }
-  // 用户登出
+  // 用户登出（#21: token 从 Authorization header 获取，不再通过 body 传递）
   rpc Logout (LogoutReq) returns (LogoutResp) {
     option (google.api.http) = {
       post: "/api/v1/user/logout"
-      body: "*"
     };
   }
   // 更新用户资料
@@ -60,9 +59,11 @@ message GetUserReq {
   int64 id = 1;
 }
 
+// #20: code/message 字段标记废弃，应改用 gRPC status codes 传递错误
+// 保留字段以兼容现有客户端，新服务端实现应使用 status.Error() 返回错误
 message GetUserResp {
-  uint32 code = 1;
-  string message = 2;
+  uint32 code = 1 [deprecated = true];
+  string message = 2 [deprecated = true];
   UserInfo data = 3;
   reserved 4 to 99;
 }
@@ -72,12 +73,12 @@ message UserInfo {
   int64  id          = 1;
   string email       = 2;
   string phone       = 3;
-  string realName    = 4;
+  string real_name   = 4;  // snake_case per protobuf style guide
   string avatar      = 5;
   int32  gender      = 6;
   int32  age         = 7;
-  string createTime  = 8;
-  string updateTime  = 9;
+  string create_time = 8;  // TODO: 迁移为 google.protobuf.Timestamp
+  string update_time = 9;  // TODO: 迁移为 google.protobuf.Timestamp
   string remark      = 10;
   reserved 11 to 99;
 }
@@ -87,7 +88,7 @@ message RegisterReq {
   string phone      = 1;
   string password   = 2;
   string email      = 3;
-  string realName   = 4;
+  string real_name  = 4;
   string avatar     = 5;
   int32  gender     = 6;
   int32  age        = 7;
@@ -96,8 +97,8 @@ message RegisterReq {
 }
 
 message RegisterResp {
-  uint32 code = 1;
-  string message = 2;
+  uint32 code = 1 [deprecated = true];
+  string message = 2 [deprecated = true];
   reserved 3 to 99;
 }
 
@@ -109,8 +110,8 @@ message LoginReq {
 }
 
 message LoginResp {
-  uint32 code    = 1;
-  string message = 2;
+  uint32 code    = 1 [deprecated = true];
+  string message = 2 [deprecated = true];
   string token   = 3;
   UserInfo data  = 4;
   reserved 5 to 99;
@@ -118,56 +119,55 @@ message LoginResp {
 
 // 用户列表（分页）
 message ListUsersReq {
-  int32  page      = 1;
-  int32  pageSize  = 2;
-  string phone     = 3;
-  string name      = 4;
+  int32  page        = 1;
+  int32  page_size   = 2;
+  string phone       = 3;
+  string name        = 4;
   // 排序字段（白名单校验：id, create_time, update_time），默认 "id"
-  string sortBy    = 5;
+  string sort_by     = 5;
   // 排序方向："asc" 或 "desc"，默认 "desc"
-  string sortOrder = 6;
+  string sort_order  = 6;
   reserved 7 to 99;
 }
 
 message ListUsersResp {
-  uint32         code     = 1;
-  string         message  = 2;
-  int64          total    = 3;
-  int32          page     = 4;
-  int32          pageSize = 5;
-  repeated UserInfo data = 6;
+  uint32         code      = 1 [deprecated = true];
+  string         message   = 2 [deprecated = true];
+  int64          total     = 3;
+  int32          page      = 4;
+  int32          page_size = 5;
+  repeated UserInfo data   = 6;
   reserved 7 to 99;
 }
 
-// 登出
+// 登出（#21: token 从 Authorization header 获取，消息体无需传 token）
 message LogoutReq {
-  string token = 1;
-  reserved 2 to 99;
+  reserved 1 to 99;  // token 字段已移除，改从 header 获取
 }
 
 message LogoutResp {
-  uint32 code    = 1;
-  string message = 2;
+  uint32 code    = 1 [deprecated = true];
+  string message = 2 [deprecated = true];
   reserved 3 to 99;
 }
 
 // 更新用户
 message UpdateUserReq {
-  int64  id       = 1;
-  string email    = 2;
-  string realName = 3;
-  string avatar   = 4;
-  int32  gender   = 5;
-  int32  age      = 6;
-  string remark   = 7;
+  int64  id        = 1;
+  string email     = 2;
+  string real_name = 3;
+  string avatar    = 4;
+  int32  gender    = 5;
+  int32  age       = 6;
+  string remark    = 7;
   // 标记需要强制清空的字段名（如 "email","remark"），不填则空值不更新
-  repeated string forceClearFields = 8;
+  repeated string force_clear_fields = 8;
   reserved 9 to 99;
 }
 
 message UpdateUserResp {
-  uint32 code    = 1;
-  string message = 2;
+  uint32 code    = 1 [deprecated = true];
+  string message = 2 [deprecated = true];
   reserved 3 to 99;
 }
 
@@ -178,7 +178,7 @@ message DeleteUserReq {
 }
 
 message DeleteUserResp {
-  uint32 code    = 1;
-  string message = 2;
+  uint32 code    = 1 [deprecated = true];
+  string message = 2 [deprecated = true];
   reserved 3 to 99;
 }
