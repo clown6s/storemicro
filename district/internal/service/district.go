@@ -30,6 +30,7 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 	zap.L().Debug("GetProvinceTree called", zap.String("adCode", req.AdCode))
 
 	districts, err := d.uc.Get(ctx, req.AdCode)
+
 	if err != nil {
 		if errors.Is(err, biz.ErrInvalidAdCode) {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
@@ -51,6 +52,7 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 	}
 
 	tree := buildDistrictTree(districts)
+
 	return &districtv1.GetProvinceTreeResp{
 		Code:    200,
 		Message: "success",

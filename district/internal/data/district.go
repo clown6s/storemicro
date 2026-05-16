@@ -25,50 +25,121 @@ func (d districtRepo) Get(ctx context.Context, adCode string) ([]*biz.District, 
 	)
 
 	if adCode != "" {
-		// [M1] 修复：CTE 分两步
-		// 1. 向上回溯找到根节点（省级）
-		// 2. 从根节点向下遍历所有子节点
-		// 显式限制递归深度防止循环引用数据导致资源耗尽
+		// 递归查询指定行政区所属的完整树结构
+		// 仅返回：province / city / district / street
+		// 限制递归深度防止异常数据导致死循环
 		query = `
 WITH RECURSIVE ancestors AS (
-    -- 向上回溯：从给定节点找到省级根节点（排除 country 层级）
-    SELECT id, parent_adcode, adcode, name, level, center, 1 AS depth
+    -- 从当前节点向上查找祖先节点
+    SELECT
+        id,
+        parent_adcode,
+        adcode,
+        name,
+        level,
+        center,
+        1 AS depth
     FROM district
-    WHERE adcode = ? AND level != 'country'
+    WHERE adcode = ?
+      AND level IN ('province', 'city', 'district', 'street')
+
     UNION ALL
-    SELECT d.id, d.parent_adcode, d.adcode, d.name, d.level, d.center, a.depth + 1
+
+    SELECT
+        d.id,
+        d.parent_adcode,
+        d.adcode,
+        d.name,
+        d.level,
+        d.center,
+        a.depth + 1
     FROM district d
-    INNER JOIN ancestors a ON d.adcode = a.parent_adcode
-    WHERE a.level != 'country' AND a.depth < 20
+    INNER JOIN ancestors a
+        ON d.adcode = a.parent_adcode
+    WHERE a.depth < 20
+      AND d.level IN ('province', 'city', 'district', 'street')
 ),
+
 root AS (
-    -- 取到最顶层的省级行政区
-    SELECT id, parent_adcode, adcode, name, level, center
+    -- 获取最顶层祖先节点
+    -- 使用 depth DESC 保证拿到最高层级
+    SELECT
+        id,
+        parent_adcode,
+        adcode,
+        name,
+        level,
+        center
     FROM ancestors
-    WHERE parent_adcode = '100000' OR level = 'province'
+    ORDER BY depth DESC
     LIMIT 1
 ),
+
 district_tree AS (
-    -- 从根节点向下遍历所有子节点（限制深度防止循环引用）
-    SELECT r.id, r.parent_adcode, r.adcode, r.name, r.level, r.center, 1 AS depth
+    -- 从根节点向下递归查询所有子节点
+    SELECT
+        r.id,
+        r.parent_adcode,
+        r.adcode,
+        r.name,
+        r.level,
+        r.center,
+        1 AS depth
     FROM root r
+
     UNION ALL
-    SELECT d.id, d.parent_adcode, d.adcode, d.name, d.level, d.center, dt.depth + 1
+
+    SELECT
+        d.id,
+        d.parent_adcode,
+        d.adcode,
+        d.name,
+        d.level,
+        d.center,
+        dt.depth + 1
     FROM district d
-    INNER JOIN district_tree dt ON d.parent_adcode = dt.adcode
+    INNER JOIN district_tree dt
+        ON d.parent_adcode = dt.adcode
     WHERE dt.depth < 20
+      AND d.level IN ('province', 'city', 'district', 'street')
 )
-SELECT DISTINCT id, parent_adcode, adcode, name, level, center FROM district_tree LIMIT 10000`
+
+SELECT DISTINCT
+    id,
+    parent_adcode,
+    adcode,
+    name,
+    level,
+    center
+FROM district_tree
+WHERE level IN ('province', 'city', 'district', 'street')
+ORDER BY adcode
+LIMIT 10000
+`
 		args = append(args, adCode)
 	} else {
-		// LIMIT 10000: 中国行政区划总数约 3000+，此值留有充足余量覆盖未来新增
-		// 若数据量持续增长，建议改为流式处理或分页接口
-		query = `SELECT id, parent_adcode, adcode, name, level, center FROM district WHERE level != 'country' ORDER BY adcode LIMIT 10000`
+		// 返回全部行政区（不包含 country）
+		query = `
+SELECT
+    id,
+    parent_adcode,
+    adcode,
+    name,
+    level,
+    center
+FROM district
+WHERE level IN ('province', 'city', 'district', 'street')
+ORDER BY adcode
+`
 	}
 
 	rows, err := d.data.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		zap.L().Error("districtRepo.Get query failed", zap.String("adCode", adCode), zap.Error(err))
+		zap.L().Error(
+			"districtRepo.Get query failed",
+			zap.String("adCode", adCode),
+			zap.Error(err),
+		)
 		return nil, fmt.Errorf("query district failed: %w", err)
 	}
 	defer rows.Close()
