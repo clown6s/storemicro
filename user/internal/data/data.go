@@ -43,6 +43,10 @@ func NewData(c *conf.Data, r *redis.Redis) (*Data, func(), error) {
 	if c.Database.MaxIdleConns > 0 {
 		pool.MaxIdleConns = int(c.Database.MaxIdleConns)
 	}
+	// MaxIdleConns 不应超过 MaxOpenConns，否则空闲连接池大小无意义
+	if pool.MaxIdleConns > pool.MaxOpenConns && pool.MaxOpenConns > 0 {
+		pool.MaxIdleConns = pool.MaxOpenConns
+	}
 	if c.Database.ConnMaxLifetime > 0 {
 		pool.ConnMaxLifetime = int(c.Database.ConnMaxLifetime)
 	}

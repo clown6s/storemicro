@@ -175,11 +175,9 @@ func (s *UserService) UpdateUser(ctx context.Context, req *userv1.UpdateUserReq)
 		Email:    req.Email,
 		RealName: req.RealName,
 		Avatar:   req.Avatar,
-		Gender:   req.Gender,
-		Age:      req.Age,
 		Remark:   req.Remark,
 	}
-	// 构建 UpdateFields 标记需要强制清空的字段（白名单校验）
+	// 1. 先处理 ForceClearFields（表示要清零的字段）
 	if len(req.ForceClearFields) > 0 {
 		allowed := map[string]bool{"email": true, "remark": true, "avatar": true, "real_name": true, "gender": true, "age": true}
 		user.UpdateFields = make(map[string]bool, len(req.ForceClearFields))
@@ -189,6 +187,21 @@ func (s *UserService) UpdateUser(ctx context.Context, req *userv1.UpdateUserReq)
 			}
 			user.UpdateFields[f] = true
 		}
+	}
+	// 2. 再处理 proto3 optional 字段（指针非 nil 表示客户端显式设置了该字段，优先级高于 ForceClearFields）
+	if req.Gender != nil {
+		user.Gender = *req.Gender
+		if user.UpdateFields == nil {
+			user.UpdateFields = make(map[string]bool)
+		}
+		user.UpdateFields["gender"] = true
+	}
+	if req.Age != nil {
+		user.Age = *req.Age
+		if user.UpdateFields == nil {
+			user.UpdateFields = make(map[string]bool)
+		}
+		user.UpdateFields["age"] = true
 	}
 
 	if err := s.uc.Update(ctx, user); err != nil {

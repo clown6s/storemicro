@@ -221,17 +221,22 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 		setClauses = append(setClauses, "avatar = ?")
 		args = append(args, user.Avatar)
 	}
-	if user.Gender >= 0 {
+	if forceSet("gender") {
 		setClauses = append(setClauses, "gender = ?")
 		args = append(args, user.Gender)
 	}
-	if user.Age >= 0 {
+	if forceSet("age") {
 		setClauses = append(setClauses, "age = ?")
 		args = append(args, user.Age)
 	}
 	if user.Email != "" || forceSet("email") {
-		setClauses = append(setClauses, "email = ?")
-		args = append(args, user.Email)
+		if user.Email == "" {
+			// 清空 email 时写 NULL，避免空字符串触发 unique index 冲突
+			setClauses = append(setClauses, "email = NULL")
+		} else {
+			setClauses = append(setClauses, "email = ?")
+			args = append(args, user.Email)
+		}
 	}
 	if user.Remark != "" || forceSet("remark") {
 		setClauses = append(setClauses, "remark = ?")

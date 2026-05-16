@@ -58,7 +58,7 @@ district_tree AS (
     INNER JOIN district_tree dt ON d.parent_adcode = dt.adcode
     WHERE dt.depth < 20
 )
-SELECT id, parent_adcode, adcode, name, level, center FROM district_tree`
+SELECT DISTINCT id, parent_adcode, adcode, name, level, center FROM district_tree LIMIT 10000`
 		args = append(args, adCode)
 	} else {
 		// LIMIT 10000: 中国行政区划总数约 3000+，此值留有充足余量覆盖未来新增

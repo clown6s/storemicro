@@ -27,10 +27,5 @@ func MaskEmail(email string) string {
 	}
 	local := email[:at]
 	domain := email[at+1:]
-	switch {
-	case len(local) >= 1:
-		return local[:1] + "***@" + domain
-	default:
-		return "***@" + domain
-	}
+	return local[:1] + "***@" + domain
 }

@@ -78,7 +78,8 @@ func corsMiddleware(allowOrigins []string) func(http.Handler) http.Handler {
 					w.Header().Set("Access-Control-Allow-Origin", origin)
 					w.Header().Add("Vary", "Origin")
 					w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+					w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-Id, Accept-Language")
+					w.Header().Set("Access-Control-Expose-Headers", "Content-Length, X-Request-Id")
 					w.Header().Set("Access-Control-Allow-Credentials", "true")
 					w.Header().Set("Access-Control-Max-Age", "86400")
 				}
@@ -149,7 +150,6 @@ const ContextKeyUserID contextKey = "user_id"
 var NoAuthRoutes = map[string]struct{}{
 	"POST /api/v1/user/register": {},
 	"POST /api/v1/user/login":    {},
-	"GET /healthz":               {},
 }
 
 // RateLimitScript Lua 脚本原子化限流操作
@@ -255,6 +255,16 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			tokenStr = strings.TrimSpace(authHeader[7:])
 		}
 
+		// 拒绝过长的 token，防止 Redis key 爆炸
+		if len(tokenStr) > 4096 {
+			pkglog.L().Warn("jwt auth failed: token too long",
+				zap.String("path", cleaned),
+				zap.Int("len", len(tokenStr)),
+			)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
+			return
+		}
+
 		// #10: JWT issuer 校验
 		// #11: JWT 显式过期校验
 		token, err := jwt.ParseWithClaims(tokenStr, &claims{}, func(token *jwt.Token) (any, error) {
@@ -338,11 +348,9 @@ func IsNoAuthRoute(method, rawPath string) bool {
 }
 
 func isNoAuthRoute(method, rawPath string) bool {
-	unescaped, err := url.PathUnescape(rawPath)
-	if err != nil {
-		return false
-	}
-	cleaned := path.Clean(unescaped)
+	// r.URL.Path 已经被 net/http 自动 decode，直接 Clean 即可
+	// 不能再调 url.PathUnescape，否则 double decode 导致安全绕过
+	cleaned := path.Clean(rawPath)
 	_, allowed := NoAuthRoutes[method+" "+cleaned]
 	return allowed
 }

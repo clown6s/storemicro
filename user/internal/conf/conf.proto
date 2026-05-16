@@ -34,13 +34,12 @@ message Server {
 
 message Data {
   message Database {
-    string  driver          = 1;
-    string  source          = 2;
-    int64   max_open_conns  = 3;  // 最大打开连接数，默认 100
-    int64   max_idle_conns  = 4;  // 最大空闲连接数，默认 25
-    int64   conn_max_lifetime = 5; // 连接最大存活时间（秒），默认 3600
-    int64   conn_max_idle_time = 6; // 空闲连接最大存活时间（秒），默认 conn_max_lifetime/2
-    reserved 7 to 99;
+    string  source          = 1;
+    int64   max_open_conns  = 2;  // 最大打开连接数，默认 100
+    int64   max_idle_conns  = 3;  // 最大空闲连接数，默认 25
+    int64   conn_max_lifetime = 4; // 连接最大存活时间（秒），默认 3600
+    int64   conn_max_idle_time = 5; // 空闲连接最大存活时间（秒），默认 conn_max_lifetime/2
+    reserved 6 to 99;
   }
   Database database = 1;
 }

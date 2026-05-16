@@ -136,10 +136,10 @@ func validateUserFields(user *User, isRegister bool) error {
 			return ErrInvalidEmail
 		}
 	}
-	if user.Gender >= 0 && user.Gender > 2 {
+	if user.Gender < 0 || user.Gender > 2 {
 		return ErrInvalidGender
 	}
-	if user.Age >= 0 && user.Age > 150 {
+	if user.Age < 0 || user.Age > 150 {
 		return ErrInvalidAge
 	}
 	if len(user.RealName) > 0 && len(user.RealName) < 2 {
@@ -178,6 +178,7 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 		return ErrPasswordTooShort
 	}
 	if len(user.Password) > 72 {
+		// bcrypt 截断限制为 72 字节（非字符），UTF-8 中文约 3 字节/字
 		return ErrPasswordTooLong
 	}
 	if !hasUpper.MatchString(user.Password) {

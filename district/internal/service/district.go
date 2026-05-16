@@ -60,6 +60,7 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 
 // buildDistrictTree 将平铺的行政区列表构建为树结构
 // 根节点判断：父 adCode 为 "100000" 或父节点不在结果集中
+// 包含环检测：如果存在循环 parent 引用，记录警告并将环内节点提升为根
 func buildDistrictTree(districts []*biz.District) []*districtv1.DistrictTree {
 	nodeMap := make(map[string]*districtv1.DistrictTree, len(districts))
 
@@ -78,11 +79,19 @@ func buildDistrictTree(districts []*biz.District) []*districtv1.DistrictTree {
 
 	var roots []*districtv1.DistrictTree
 
-	// 2. 构建树
+	// 2. 构建父子关系（带环检测）
 	for _, node := range nodeMap {
 		parent, ok := nodeMap[node.ParentAdCode]
 		if !ok || node.ParentAdCode == "100000" {
-			// 父节点不在结果集中，或是省级根节点
+			roots = append(roots, node)
+			continue
+		}
+		// 环检测：从 parent 沿链往上走，如果回到 node 本身则有环
+		if hasCycle(node.AdCode, parent, nodeMap) {
+			zap.L().Warn("buildDistrictTree: cycle detected, treating as root",
+				zap.String("adCode", node.AdCode),
+				zap.String("parentAdCode", node.ParentAdCode),
+			)
 			roots = append(roots, node)
 			continue
 		}
@@ -93,6 +102,27 @@ func buildDistrictTree(districts []*biz.District) []*districtv1.DistrictTree {
 	sortTree(roots)
 
 	return roots
+}
+
+// hasCycle 从 start 沿 parent 链往上走，检查是否能到达 targetAdCode
+func hasCycle(targetAdCode string, start *districtv1.DistrictTree, nodeMap map[string]*districtv1.DistrictTree) bool {
+	visited := make(map[string]bool)
+	current := start
+	for current != nil {
+		if current.AdCode == targetAdCode {
+			return true
+		}
+		if visited[current.AdCode] {
+			break // 已经走过的链不会再有新的环
+		}
+		visited[current.AdCode] = true
+		parent, ok := nodeMap[current.ParentAdCode]
+		if !ok || current.ParentAdCode == "100000" {
+			break
+		}
+		current = parent
+	}
+	return false
 }
 
 func sortTree(nodes []*districtv1.DistrictTree) {

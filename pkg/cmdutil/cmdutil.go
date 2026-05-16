@@ -26,12 +26,12 @@ func UnquoteValue(s string) string {
 var envKeyPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func LoadDotenv(configFile string) {
-	candidates := []string{filepath.Join(configFile, ".env"), ".env", "../.env"}
+	candidates := []string{".env"}
 	if configFile != "" {
 		if info, err := os.Stat(configFile); err == nil && info.IsDir() {
-			candidates[0] = filepath.Join(configFile, ".env")
+			candidates = append([]string{filepath.Join(configFile, ".env")}, candidates...)
 		} else {
-			candidates[0] = filepath.Join(filepath.Dir(configFile), ".env")
+			candidates = append([]string{filepath.Join(filepath.Dir(configFile), ".env")}, candidates...)
 		}
 	}
 	for _, p := range candidates {
@@ -102,5 +102,6 @@ func ResolveConfDir() string {
 			return p
 		}
 	}
-	return candidates[0]
+	// 未找到任何配置目录，返回空字符串让调用方报错
+	return ""
 }

@@ -169,8 +169,12 @@ func main() {
 
 	helper.Infow("msg", "service started", "name", Name)
 
-	// 健康检查 HTTP sidecar（:9103）
-	healthSrv := startHealthServer(":9103", helper, appData)
+	// 健康检查 HTTP sidecar（默认 :9103，可通过 HEALTH_PORT 环境变量覆盖）
+	healthAddr := ":9103"
+	if hp := os.Getenv("HEALTH_PORT"); hp != "" {
+		healthAddr = hp
+	}
+	healthSrv := startHealthServer(healthAddr, helper, appData)
 
 	// 启动服务（阻塞，内部监听信号并优雅退出）
 	if err := app.Run(); err != nil {

@@ -126,6 +126,11 @@ func (l *ZapLogger) Log(level log.Level, keyvals ...any) error {
 	var msg string
 	var fields []zap.Field
 
+	// 奇数长度 keyvals 表示调用方传参错误，记录警告防止静默丢数据
+	if len(keyvals)%2 != 0 {
+		l.logger.Warn("zaplogger: odd number of keyvals passed", zap.Int("count", len(keyvals)))
+	}
+
 	switch level {
 	case log.LevelDebug:
 		zl = zapcore.DebugLevel

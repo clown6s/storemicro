@@ -35,4 +35,4 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
   CMD curl -sf http://localhost:8080/healthz || exit 1
 
 ENTRYPOINT ["/app/gateway"]
-CMD ["-conf", "configs"]
+CMD ["-conf", "configs/config.yaml"]

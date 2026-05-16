@@ -183,7 +183,10 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 
 // ServeHTTP 实现 http.Handler 接口
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	p.otelHandler.ServeHTTP(w, r)
+	// 为每个请求设置独立的 gRPC 超时，防止后端挂起时阻塞到 HTTP WriteTimeout
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+	p.otelHandler.ServeHTTP(w, r.WithContext(ctx))
 }
 
 // Rdb 返回 Redis 客户端（供健康检查使用）

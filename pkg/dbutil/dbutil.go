@@ -31,6 +31,7 @@ func DefaultPool() DefaultPoolConfig {
 var allowedDrivers = map[string]bool{"mysql": true}
 
 // Connect 创建并验证 MySQL 连接（带重试和连接池配置）
+// WARNING: dsn 参数包含数据库密码，严禁在日志或错误信息中输出 dsn 内容
 func Connect(driver, dsn string, pool DefaultPoolConfig) (*sql.DB, error) {
 	if !allowedDrivers[driver] {
 		return nil, fmt.Errorf("unsupported database driver: %s", driver)
@@ -66,6 +67,7 @@ func Connect(driver, dsn string, pool DefaultPoolConfig) (*sql.DB, error) {
 	db.SetConnMaxIdleTime(time.Duration(idleTime) * time.Second)
 
 	// [C5] 带可取消 context 的 MySQL 连接验证
+	// 注意：context timeout (30s) 是硬上限，可能在所有重试完成前到期
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 

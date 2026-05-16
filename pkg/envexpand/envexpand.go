@@ -20,7 +20,8 @@ var _ config.Source = (*envFile)(nil)
 var envPattern = regexp.MustCompile(`\$\{(\w+):([^}]*)\}|\$\{(\w+)\}|\$(\w+)`)
 
 // ExpandEnv 支持 ${VAR:default}、${VAR} 和 $VAR 语法，导出供外部使用。
-// 使用单次正则匹配，避免 os.ExpandEnv 双重展开导致密码含 $ 时被截断
+// 使用单次正则匹配，避免 os.ExpandEnv 双重展开导致密码含 $ 时被截断。
+// 注意：不支持嵌套变量引用（如 ${${PREFIX}_HOST}），遇到嵌套 $ 保持原文。
 func ExpandEnv(s string) string {
 	return envPattern.ReplaceAllStringFunc(s, func(match string) string {
 		sub := envPattern.FindStringSubmatch(match)
@@ -92,6 +93,7 @@ func (f *envFile) loadDir(path string) (kvs []*config.KeyValue, err error) {
 	sort.Slice(files, func(i, j int) bool {
 		return files[i].Name() < files[j].Name()
 	})
+	kvs = make([]*config.KeyValue, 0)
 	for _, file := range files {
 		if file.IsDir() || strings.HasPrefix(file.Name(), ".") {
 			continue

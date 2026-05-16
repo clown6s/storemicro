@@ -15,6 +15,7 @@ type Redis struct {
 }
 
 // NewRedis 创建 Redis 客户端（带连接池、超时、重试配置）
+// TODO: 连接池参数（PoolSize/MinIdleConns）目前硬编码，后续应通过 conf.proto 配置化
 func NewRedis(addr, password string, db int) (*Redis, error) {
 	client := redis.NewClient(&redis.Options{
 		Addr:         addr,
@@ -59,10 +60,16 @@ redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[3])
 return 1
 `)
 
-// [M9] deleteTokenScript Lua 脚本原子化 token 删除操作
+// deleteTokenScript Lua 脚本原子化 token 删除操作
 // KEYS[1] = token正向映射 key, KEYS[2] = user_token反向映射 key
-// 原子删除两个 key，避免 Pipeline 非原子性导致的"幽灵 token"
+// ARGV[1] = 当前 token（用于 CAS 校验，防止并发 Login 写入新 token 后被误删）
+// 只有反向映射中的 token 与当前 token 一致时才删除，避免竞态条件
 var deleteTokenScript = redis.NewScript(`
+local current = redis.call('GET', KEYS[2])
+if current ~= ARGV[1] then
+	-- 反向映射已被并发 Login 更新为其他 token，不删除
+	return 0
+end
 redis.call('DEL', KEYS[1])
 redis.call('DEL', KEYS[2])
 return 1
@@ -112,7 +119,7 @@ func (r *Redis) DeleteToken(ctx context.Context, token string, userID int64) err
 	tokenKey := fmt.Sprintf("storemicro:user:token:%s", token)
 	userTokenKey := fmt.Sprintf("storemicro:user:token_map:%d", userID)
 
-	_, err := deleteTokenScript.Run(ctx, r.client, []string{tokenKey, userTokenKey}).Result()
+	_, err := deleteTokenScript.Run(ctx, r.client, []string{tokenKey, userTokenKey}, token).Result()
 	return err
 }
 

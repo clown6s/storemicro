@@ -77,8 +77,12 @@ func main() {
 	log.SetLogger(kratosLogger)
 
 	// 初始化链路追踪（OTLP gRPC → Jaeger）
+	serviceName := appCfg.Name
+	if serviceName == "" {
+		serviceName = "storemicro-gateway"
+	}
 	shutdown, err := pkgtracing.InitTracer(pkgtracing.Conf{
-		ServiceName: "storemicro-gateway",
+		ServiceName: serviceName,
 		Endpoint:    appCfg.Tracing.Endpoint,
 		SampleRate:  appCfg.Tracing.SampleRate,
 	})
@@ -103,12 +107,13 @@ func main() {
 
 	// 创建 HTTP 服务器（超时从配置读取，请求体大小限制 10MB）
 	srv := &http.Server{
-		Addr:           appCfg.Server.Addr,
-		Handler:        limitRequestBody(newRootMux(proxy, appCfg.MetricsPassword), 10<<20),
-		ReadTimeout:    appCfg.Server.ReadTimeout,
-		WriteTimeout:   appCfg.Server.WriteTimeout,
-		IdleTimeout:    appCfg.Server.IdleTimeout,
-		MaxHeaderBytes: 1 << 20,
+		Addr:              appCfg.Server.Addr,
+		Handler:           limitRequestBody(newRootMux(proxy, appCfg.MetricsPassword), 10<<20),
+		ReadTimeout:       appCfg.Server.ReadTimeout,
+		ReadHeaderTimeout: 10 * time.Second, // 防止 slow-loris 攻击：header 读取必须在 10s 内完成
+		WriteTimeout:      appCfg.Server.WriteTimeout,
+		IdleTimeout:       appCfg.Server.IdleTimeout,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	pkglog.L().Info("storemicro gateway starting",
@@ -151,7 +156,13 @@ func main() {
 		default:
 		}
 		if !conn.WaitForStateChange(drainCtx, connectivity.Ready) {
+			// context 超时，连接状态未变化
 			continue
+		}
+		// 状态已从 Ready 变化，检查当前状态决定是否等待更多
+		state := conn.GetState()
+		if state == connectivity.Shutdown || state == connectivity.TransientFailure {
+			continue // 连接已关闭或故障，无需等待
 		}
 	}
 closeProxy:

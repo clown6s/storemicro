@@ -155,9 +155,14 @@ func main() {
 				etcdClient.Close()
 			}
 			var err error
+			// etcd Timeout 防御性校验：0 或负值回退到 5 秒
+			etcdTimeout := bc.Registry.Etcd.Timeout
+			if etcdTimeout <= 0 {
+				etcdTimeout = 5
+			}
 			etcdClient, err = clientv3.New(clientv3.Config{
 				Endpoints:   bc.Registry.Etcd.Endpoints,
-				DialTimeout: time.Duration(bc.Registry.Etcd.Timeout) * time.Second,
+				DialTimeout: time.Duration(etcdTimeout) * time.Second,
 			})
 			return err
 		},
@@ -186,8 +191,12 @@ func main() {
 
 	helper.Infow("msg", "service started", "name", Name)
 
-	// 健康检查 HTTP sidecar（:9101），供 K8s liveness/readiness probe
-	healthSrv := startHealthServer(":9101", helper, appData)
+	// 健康检查 HTTP sidecar（默认 :9101，可通过 HEALTH_PORT 环境变量覆盖）
+	healthAddr := ":9101"
+	if hp := os.Getenv("HEALTH_PORT"); hp != "" {
+		healthAddr = hp
+	}
+	healthSrv := startHealthServer(healthAddr, helper, appData)
 
 	// 启动服务（阻塞，内部监听信号并优雅退出）
 	if err := app.Run(); err != nil {
@@ -278,14 +287,12 @@ func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *htt
 		w.WriteHeader(code)
 		_, _ = w.Write(b)
 	})
-	// Prometheus metrics 端点（可选 Bearer token 认证）
-	metricsHandler := http.Handler(promhttp.Handler())
+	// Prometheus metrics 端点（必须配置 Bearer token 才启用）
 	if metricsPassword := os.Getenv("METRICS_PASSWORD"); metricsPassword != "" {
-		metricsHandler = pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword)
+		mux.Handle("/metrics", pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword))
 	} else {
-		helper.Warn("metrics: no password configured, metrics endpoint is disabled")
+		helper.Warn("metrics: no METRICS_PASSWORD configured, /metrics endpoint is disabled")
 	}
-	mux.Handle("/metrics", metricsHandler)
 
 	// 为整个 health mux 包裹 panic recovery（与 gateway 保持一致）
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

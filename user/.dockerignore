@@ -5,6 +5,7 @@
 *.md
 *.test
 *.out
+*.exe
 vendor/
 bin/
 tmp/

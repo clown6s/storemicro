@@ -45,6 +45,8 @@ func InitTracer(c Conf) (func(context.Context) error, error) {
 	}
 
 	// 创建 OTLP gRPC exporter（10秒连接超时）
+	// TODO: 生产环境应使用 TLS（移除 WithInsecure，配置 WithTLSCredentials）
+	// 当前仅在可信内网环境下使用明文传输
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	exp, err := otlptracegrpc.New(ctx,

@@ -215,6 +215,11 @@ func Load(path string) (*AppConfig, error) {
 		fmt.Fprintln(os.Stderr, "[WARN] redis.password is empty, set REDIS_PASSWORD env var for production")
 	}
 
+	// 校验链路追踪 SampleRate 范围 (0.0-1.0)
+	if cfg.Tracing.SampleRate < 0 || cfg.Tracing.SampleRate > 1 {
+		return nil, fmt.Errorf("tracing.sample_rate must be between 0.0 and 1.0, got %.2f", cfg.Tracing.SampleRate)
+	}
+
 	// 校验 gRPC 客户端配置
 	if err := validateGrpcClient(&cfg.GrpcClient); err != nil {
 		return nil, err
@@ -233,6 +238,11 @@ func validateGrpcClient(c *GrpcClientConfig) error {
 		return fmt.Errorf("grpc_client.load_balancing_policy must be 'round_robin' or 'pick_first', got %q", c.LoadBalancingPolicy)
 	}
 
+	// MaxAttempts 范围校验（1=不重试，2=重试1次，上限10防止重试风暴）
+	if c.Retry.MaxAttempts > 10 {
+		return fmt.Errorf("grpc_client.retry.max_attempts must be <= 10, got %d", c.Retry.MaxAttempts)
+	}
+
 	// #17: BackoffMultiplier 必须大于 0
 	if c.Retry.BackoffMultiplier <= 0 {
 		return fmt.Errorf("grpc_client.retry.backoff_multiplier must be > 0, got %.2f", c.Retry.BackoffMultiplier)
@@ -249,6 +259,32 @@ func validateGrpcClient(c *GrpcClientConfig) error {
 	}
 	if c.MaxSendMsgSize <= 0 || c.MaxSendMsgSize > 100 {
 		return fmt.Errorf("grpc_client.max_send_msg_size must be between 1 and 100 MB, got %d", c.MaxSendMsgSize)
+	}
+
+	// 校验 RetryableCodes 只包含合法的 gRPC 状态码名
+	validCodes := map[string]bool{
+		"CANCELLED": true, "UNKNOWN": true, "INVALID_ARGUMENT": true,
+		"DEADLINE_EXCEEDED": true, "NOT_FOUND": true, "ALREADY_EXISTS": true,
+		"PERMISSION_DENIED": true, "RESOURCE_EXHAUSTED": true,
+		"FAILED_PRECONDITION": true, "ABORTED": true, "OUT_OF_RANGE": true,
+		"UNIMPLEMENTED": true, "INTERNAL": true, "UNAVAILABLE": true,
+		"DATA_LOSS": true, "UNAUTHENTICATED": true,
+	}
+	for _, code := range c.Retry.RetryableCodes {
+		if !validCodes[code] {
+			return fmt.Errorf("grpc_client.retry.retryable_codes contains invalid gRPC code: %q", code)
+		}
+	}
+
+	// CircuitBreaker 配置校验
+	if c.CircuitBreaker.FailureRatio < 0 || c.CircuitBreaker.FailureRatio > 1 {
+		return fmt.Errorf("grpc_client.circuit_breaker.failure_ratio must be between 0.0 and 1.0, got %.2f", c.CircuitBreaker.FailureRatio)
+	}
+	if c.CircuitBreaker.MaxRequests < 0 {
+		return fmt.Errorf("grpc_client.circuit_breaker.max_requests must be >= 0, got %d", c.CircuitBreaker.MaxRequests)
+	}
+	if c.CircuitBreaker.MinRequests < 0 {
+		return fmt.Errorf("grpc_client.circuit_breaker.min_requests must be >= 0, got %d", c.CircuitBreaker.MinRequests)
 	}
 
 	return nil
