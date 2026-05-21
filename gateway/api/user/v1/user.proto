@@ -71,12 +71,12 @@ message UserInfo {
   int64  id          = 1;
   string email       = 2;
   string phone       = 3;
-  string real_name   = 4;  // snake_case per protobuf style guide
+  string realName    = 4;
   string avatar      = 5;
   int32  gender      = 6;
   int32  age         = 7;
-  string create_time = 8;  // TODO: 迁移为 google.protobuf.Timestamp
-  string update_time = 9;  // TODO: 迁移为 google.protobuf.Timestamp
+  string createTime  = 8;  // TODO: 迁移为 google.protobuf.Timestamp
+  string updateTime  = 9;  // TODO: 迁移为 google.protobuf.Timestamp
   string remark      = 10;
   reserved 11 to 99;
 }
@@ -86,7 +86,7 @@ message RegisterReq {
   string phone      = 1;
   string password   = 2;
   string email      = 3;
-  string real_name  = 4;
+  string realName  = 4;
   string avatar     = 5;
   int32  gender     = 6;
   int32  age        = 7;
@@ -118,13 +118,13 @@ message LoginResp {
 // 用户列表（分页）
 message ListUsersReq {
   int32  page        = 1;
-  int32  page_size   = 2;
+  int32  pageSize    = 2;
   string phone       = 3;
   string name        = 4;
-  // 排序字段（白名单校验：id, create_time, update_time），默认 "id"
-  string sort_by     = 5;
+  // 排序字段（白名单校验：id, createTime, updateTime），默认 "id"
+  string sortBy    = 5;
   // 排序方向："asc" 或 "desc"，默认 "desc"
-  string sort_order  = 6;
+  string sortOrder = 6;
   reserved 7 to 99;
 }
 
@@ -133,7 +133,7 @@ message ListUsersResp {
   string         message   = 2;
   int64          total     = 3;
   int32          page      = 4;
-  int32          page_size = 5;
+  int32          pageSize = 5;
   repeated UserInfo data   = 6;
   reserved 7 to 99;
 }
@@ -153,13 +153,13 @@ message LogoutResp {
 message UpdateUserReq {
   int64  id        = 1;
   string email     = 2;
-  string real_name = 3;
+  string realName = 3;
   string avatar    = 4;
   optional int32  gender    = 5;
   optional int32  age       = 6;
   string remark    = 7;
   // 标记需要强制清空的字段名（如 "email","remark"），不填则空值不更新
-  repeated string force_clear_fields = 8;
+  repeated string forceClearFields = 8;
   reserved 9 to 99;
 }
 

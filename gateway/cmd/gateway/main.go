@@ -48,9 +48,6 @@ func init() {
 func main() {
 	flag.Parse()
 
-	// 自动加载 .env 文件（配置文件目录 → 当前目录 → 上级目录）
-	pkgcmd.LoadDotenv(configFile)
-
 	// 加载配置文件
 	appCfg, err := appconfig.Load(configFile)
 	if err != nil {

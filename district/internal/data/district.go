@@ -114,7 +114,6 @@ SELECT DISTINCT
 FROM district_tree
 WHERE level IN ('province', 'city', 'district', 'street')
 ORDER BY adcode
-LIMIT 10000
 `
 		args = append(args, adCode)
 	} else {

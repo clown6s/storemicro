@@ -296,7 +296,7 @@ func (uc *UserUsecase) Logout(ctx context.Context, token string) error {
 
 // ListUsers sortBy 白名单（service 层防御性校验，data 层有独立校验做兜底）
 var allowedSortBy = map[string]bool{
-	"id": true, "create_time": true, "update_time": true,
+	"id": true, "createTime": true, "updateTime": true,
 }
 
 // ListUsers 用户列表（分页）

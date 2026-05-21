@@ -6,36 +6,33 @@ server:
 data:
   database:
     driver: mysql
-    source: "root:${DB_PASSWORD}@tcp(${DB_HOST}:${DB_PORT:3306})/store_micro?charset=utf8mb4&parseTime=true&loc=Local"
+    source: "root:admin@zzp@tcp(10.211.55.5:3306)/store_micro?charset=utf8mb4&parseTime=true&loc=Local"
     max_open_conns: 100
     max_idle_conns: 25
     conn_max_lifetime: 3600
 
 logger:
   level: info
-  # mode 和文件轮转通过环境变量配置：
-  #   LOG_MODE=prod       启用 JSON 格式（默认 dev = console 彩色）
-  #   LOG_FILE=/var/log/storemicro/user.log  启用文件输出+轮转
-  #   LOG_COMPRESS=true   启用 gzip 压缩旧日志
+
 
 registry:
   etcd:
     endpoints:
-      - "${ETCD_ENDPOINT}"
+      - "10.211.55.5:2379"
     timeout: 10
 
 # JWT 配置（⚠️ 生产环境必须通过环境变量 JWT_SECRET 注入）
 jwt:
-  secret: "${JWT_SECRET}"
+  secret: '4*8#5@7!^i(nj_9876555=+s4x3v9g12m`js0lmb8(-=+-_!`~||\]}mb<.?,.>>,mncukdkieijufonicndknveufw3io'
   expire_hours: 24
 
 # Redis 配置（⚠️ 生产环境必须通过环境变量注入密码）
 redis:
-  addr: "${REDIS_HOST}:${REDIS_PORT}"
-  password: "${REDIS_PASSWORD}"
+  addr: "10.211.55.5:6379"
+  password: "admin@zzp"
   db: 0
 
 # 链路追踪
 tracing:
-  endpoint: "${TRACING_ENDPOINT}"
+  endpoint: ""
   sample_rate: 0.1

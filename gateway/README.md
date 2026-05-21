@@ -204,7 +204,7 @@ gateway/
 │       └── district.pb.gw.go
 │
 ├── cmd/gateway/
-│   ├── main.go                    # 入口：loadDotenv → 配置 → logger → tracer → proxy → HTTP Server → 优雅退出
+│   ├── main.go                    # 入口：配置 → logger → tracer → proxy → HTTP Server → 优雅退出
 │   ├── proxy.go                   # GatewayProxy：etcd/Redis/gRPC 连接、路由注册、ServeHTTP
 │   ├── registry.go                # 服务注册表（新增服务只需加一行）
 │   ├── auth.go                    # JWT 认证中间件 + Redis token 校验 + 限流 + CORS + 安全 Header
@@ -213,9 +213,7 @@ gateway/
 │   └── flag.go                    # 命令行参数定义（-conf）
 │
 ├── configs/
-│   └── config.yaml                # 网关配置（密钥通过 ${VAR} 注入）
-├── .env                           # 本地环境变量（gitignore）
-├── .env.example                   # 环境变量模板
+│   └── config.yaml                # 网关配置
 ├── Dockerfile                     # 多阶段构建
 ├── third_party/google/            # proto HTTP 注解依赖
 ├── go.mod
@@ -226,7 +224,7 @@ gateway/
 
 | 文件 | 职责 |
 |------|------|
-| `main.go` | 启动/关闭生命周期，健康检查端点（/healthz、/readyz、/metrics），loadDotenv |
+| `main.go` | 启动/关闭生命周期，健康检查端点（/healthz、/readyz、/metrics） |
 | `proxy.go` | `GatewayProxy` 核心结构体，管理 etcd/Redis/gRPC 连接，注册所有服务路由 |
 | `registry.go` | `services []ServiceRegistration` 注册表，新增后端服务只需加一行 |
 | `auth.go` | 全部中间件：Recovery、CORS、Security Headers、JWT Auth、Rate Limit |
@@ -241,8 +239,6 @@ gateway/
 ### 配置加载流程
 
 ```
-loadDotenv()  →  自动加载 .env（config目录 / 当前目录 / 父目录，不覆盖已有环境变量）
-       ↓
 LoadAppConfig →  读取 config.yaml + ${VAR:default} 展开
        ↓
 校验           →  JWT secret ≥ 32 字符，空 Redis 密码告警
@@ -289,8 +285,7 @@ go run ./cmd/gateway/ -conf configs/config.yaml
 
 启动流程：
 
-1. `loadDotenv()` 加载环境变量
-2. `LoadAppConfig()` 加载 + 展开配置
+1. `LoadAppConfig()` 加载 + 展开配置
 3. 初始化 zap logger
 4. 初始化 OTLP tracer
 5. `NewGatewayProxy()` 创建网关代理：

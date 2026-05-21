@@ -184,7 +184,7 @@ func (s *UserService) UpdateUser(ctx context.Context, req *userv1.UpdateUserReq)
 	}
 	// 1. 先处理 ForceClearFields（表示要清零的字段）
 	if len(req.ForceClearFields) > 0 {
-		allowed := map[string]bool{"email": true, "remark": true, "avatar": true, "real_name": true, "gender": true, "age": true}
+		allowed := map[string]bool{"email": true, "remark": true, "avatar": true, "realName": true, "gender": true, "age": true}
 		user.UpdateFields = make(map[string]bool, len(req.ForceClearFields))
 		for _, f := range req.ForceClearFields {
 			if !allowed[f] {

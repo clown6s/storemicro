@@ -51,9 +51,6 @@ func main() {
 		confPath = pkgcmd.ResolveConfDir()
 	}
 
-	// 自动加载 .env 文件（配置目录 → 当前目录 → 上级目录），不覆盖已有环境变量
-	pkgcmd.LoadDotenv(confPath)
-
 	// 抑制 Kratos config.Load() 内部标准库 log 的 DEBUG 输出
 	stdlog.SetOutput(io.Discard)
 

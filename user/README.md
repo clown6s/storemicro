@@ -150,7 +150,7 @@ user/
 │   └── user.pb.gw.go           # grpc-gateway HTTP 路由（仅 gateway 生成）
 │
 ├── cmd/user/
-│   ├── main.go                 # 入口：loadDotenv → 配置 → logger → tracer → etcd → snowflake → wireApp → 启动
+│   ├── main.go                 # 入口：配置 → logger → tracer → etcd → snowflake → wireApp → 启动
 │   ├── wire.go                 # Wire 依赖注入声明
 │   └── wire_gen.go             # Wire 生成的注入代码（勿手动修改）
 │
@@ -179,7 +179,6 @@ user/
 │
 ├── configs/
 │   └── config.yaml             # 服务配置（密钥通过 ${VAR} 环境变量注入）
-├── .env                        # 本地环境变量（gitignore）
 ├── Dockerfile                  # 多阶段构建
 ├── third_party/google/         # proto HTTP 注解依赖
 ├── go.mod
@@ -193,16 +192,14 @@ user/
 ### 配置加载流程
 
 ```
-loadDotenv()  →  自动加载 .env（config目录 / 当前目录 / 父目录，不覆盖已有环境变量）
+envexpand    →  Kratos config.Source，YAML 中 ${VAR:default} 单次正则展开
        ↓
-envexpand    →  Kratos config.Source，YAML 中 ${VAR:default} 单次正则展开（避免 $ 在密码中被二次展开）
-       ↓
-config.yaml  →  所有密钥通过 ${VAR} 注入，配置文件本身不含明文密钥
+config.yaml  →  所有配置直接写入，docker-compose environment 覆盖敏感值
 ```
 
 ### 配置项
 
-配置通过 `configs/config.yaml` + `.env` 环境变量管理，密钥全部走 `${VAR}` 展开：
+配置通过 `configs/config.yaml` 管理，容器部署时由 docker-compose environment 覆盖敏感值：
 
 | 配置块 | 说明 |
 |--------|------|
@@ -227,8 +224,7 @@ go run ./cmd/user/ -conf configs/config.yaml
 
 启动流程：
 
-1. `loadDotenv()` 加载 `.env` 环境变量
-2. 通过 `envexpand` 加载配置（自动展开 `${VAR:default}`）
+1. 通过 `envexpand` 加载配置（自动展开 `${VAR:default}`）
 3. 初始化 zap logger
 4. 初始化 OTLP tracer
 5. 连接 etcd（带重试）→ 注册服务 `storemicro-user`

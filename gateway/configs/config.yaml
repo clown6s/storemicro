@@ -27,7 +27,7 @@ server:
 # etcd 服务发现
 etcd:
   endpoints:
-    - "${ETCD_ENDPOINT}"
+    - "10.211.55.5:2379"
   dial_timeout: 5s
 
 # 日志配置
@@ -42,21 +42,21 @@ logger:
 
 # JWT 配置（⚠️ 生产环境必须通过环境变量 JWT_SECRET 注入）
 jwt:
-  secret: "${JWT_SECRET}"
+  secret: '4*8#5@7!^i(nj_9876555=+s4x3v9g12m`js0lmb8(-=+-_!`~||\]}mb<.?,.>>,mncukdkieijufonicndknveufw3io'
 
 # Redis 配置（⚠️ 生产环境必须通过环境变量注入密码）
 redis:
-  addr: "${REDIS_HOST}:${REDIS_PORT:6379}"
-  password: "${REDIS_PASSWORD}"
+  addr: "10.211.55.5:6379"
+  password: "admin@zzp"
   db: 0
 
 # 链路追踪
 tracing:
-  endpoint: "${TRACING_ENDPOINT}"
+  endpoint: ""
   sample_rate: 0.1
 
 # Prometheus metrics 认证密码（为空则不启用认证，生产环境建议设置）
-metrics_password: "${METRICS_PASSWORD:}"
+metrics_password: ""
 
 # gRPC 出站客户端配置
 grpc_client:

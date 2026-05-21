@@ -118,9 +118,9 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, 
 
 	// 排序参数白名单校验（防止 SQL 注入）
 	allowedSortBy := map[string]string{
-		"id":          "id",
-		"create_time": "create_time",
-		"update_time": "update_time",
+		"id":         "id",
+		"createTime": "create_time",
+		"updateTime": "update_time",
 	}
 	sortCol, ok := allowedSortBy[sortBy]
 	if !ok {
@@ -206,14 +206,14 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 
 	// forceSet 白名单：只允许客户端强制清空以下字段，防止未来新增字段时遗漏
 	allowedForceFields := map[string]bool{
-		"real_name": true, "avatar": true, "gender": true,
+		"realName": true, "avatar": true, "gender": true,
 		"age": true, "email": true, "remark": true,
 	}
 	forceSet := func(field string) bool {
 		return user.UpdateFields != nil && user.UpdateFields[field] && allowedForceFields[field]
 	}
 
-	if user.RealName != "" || forceSet("real_name") {
+	if user.RealName != "" || forceSet("realName") {
 		setClauses = append(setClauses, "real_name = ?")
 		args = append(args, user.RealName)
 	}

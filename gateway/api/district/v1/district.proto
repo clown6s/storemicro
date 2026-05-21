@@ -1,6 +1,5 @@
 syntax = "proto3";
 
-// v1 — 行政区划服务 API（稳定版）
 // WARNING: 此文件与 district/api/district/v1/district.proto 保持同步，修改时需同步更新两处
 package api.district.v1;
 

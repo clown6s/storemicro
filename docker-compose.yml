@@ -1,22 +1,133 @@
+# ============================================================
+# StoreMicro 全栈编排 — 基础设施 + 微服务
+# ============================================================
+# 使用: docker compose up -d
+#
+# 启动顺序: MySQL → Redis/etcd → user/district → gateway
+# 注意:
+# 1. 生产环境应修改密码（搜索 admin@zzp 替换为强密码）
+# 2. 生产环境应启用 TLS（见各服务配置文件中的注释）
+# ============================================================
+
+name: storemicro
+
+x-timezone: &timezone "Asia/Shanghai"
+x-password: &password "admin@zzp"
+x-jwt-secret: &jwt-secret '4*8#5@7!^i(nj_9876555=+s4x3v9g12m`js0lmb8(-=+-_!`~||\]}mb<.?,.>>,mncukdkieijufonicndknveufw3io'
+
 services:
+
+  # =========================
+  # 基础设施
+  # =========================
+
+  mysql:
+    image: mysql:8.4
+    container_name: storemicro-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: *password
+      MYSQL_DATABASE: store_micro
+    # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
+    # ports:
+    #   - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 1G
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - internal
+
+  redis:
+    image: redis:8.6.2
+    container_name: storemicro-redis
+    command: redis-server --requirepass admin@zzp
+    # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
+    # ports:
+    #   - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "admin@zzp", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - internal
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.6.9
+    container_name: storemicro-etcd
+    environment:
+      ALLOW_NONE_AUTHENTICATION: "yes"
+      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
+      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
+    # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
+    # ports:
+    #   - "2379:2379"
+    volumes:
+      - etcd_data:/data
+    entrypoint: /usr/local/bin/etcd
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          memory: 64M
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - internal
+
+  # =========================
+  # 微服务
+  # =========================
+
   user:
     build:
       context: ./user
       dockerfile: Dockerfile
+    container_name: storemicro-user
     ports:
       - "9101:9101"
       # gRPC :9001 仅容器内通信，不映射宿主机
     environment:
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=mysql
-      - DB_PORT=3306
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - ETCD_ENDPOINT=etcd:2379
-      - TRACING_ENDPOINT=jaeger:4317
-      - JWT_SECRET=${JWT_SECRET}
-      - LOG_LEVEL=info
+      TZ: *timezone
+      DB_PASSWORD: *password
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      REDIS_PASSWORD: *password
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      ETCD_ENDPOINT: etcd:2379
+      JWT_SECRET: *jwt-secret
+      LOG_LEVEL: info
     depends_on:
       mysql:
         condition: service_healthy
@@ -46,16 +157,17 @@ services:
     build:
       context: ./district
       dockerfile: Dockerfile
+    container_name: storemicro-district
     ports:
       - "9103:9103"
       # gRPC :9003 仅容器内通信，不映射宿主机
     environment:
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=mysql
-      - DB_PORT=3306
-      - ETCD_ENDPOINT=etcd:2379
-      - TRACING_ENDPOINT=jaeger:4317
-      - LOG_LEVEL=info
+      TZ: *timezone
+      DB_PASSWORD: *password
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      ETCD_ENDPOINT: etcd:2379
+      LOG_LEVEL: info
     depends_on:
       mysql:
         condition: service_healthy
@@ -83,15 +195,18 @@ services:
     build:
       context: ./gateway
       dockerfile: Dockerfile
+    container_name: storemicro-gateway
     ports:
       - "8080:8080"
     environment:
-      - JWT_SECRET=${JWT_SECRET}
-      - REDIS_PASSWORD=${REDIS_PASSWORD}
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-      - METRICS_PASSWORD=${METRICS_PASSWORD:-}
-      - LOG_LEVEL=info
+      TZ: *timezone
+      JWT_SECRET: *jwt-secret
+      REDIS_PASSWORD: *password
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      ETCD_ENDPOINT: etcd:2379
+      METRICS_PASSWORD: ""
+      LOG_LEVEL: info
     depends_on:
       user:
         condition: service_healthy
@@ -117,87 +232,9 @@ services:
       - app
       - internal
 
-  mysql:
-    image: mysql:8.0
-    environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
-      MYSQL_DATABASE: store_micro
-    # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
-    # ports:
-    #   - "3306:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "2"
-          memory: 1G
-        reservations:
-          memory: 256M
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - internal
-
-  redis:
-    image: redis:7-alpine
-    command: redis-server --requirepass ${REDIS_PASSWORD}
-    # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
-    # ports:
-    #   - "6379:6379"
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 256M
-        reservations:
-          memory: 64M
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      environment:
-        - REDISCLI_AUTH=${REDIS_PASSWORD}
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    networks:
-      - internal
-
-  etcd:
-    image: bitnami/etcd:3
-    environment:
-      ALLOW_NONE_AUTHENTICATION: "yes"
-      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
-    # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
-    # ports:
-    #   - "2379:2379"
-    volumes:
-      - etcd_data:/bitnami/etcd
-    restart: unless-stopped
-    deploy:
-      resources:
-        limits:
-          cpus: "0.5"
-          memory: 256M
-        reservations:
-          memory: 64M
-    healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    networks:
-      - internal
-
+# ============================================================
+# 网络
+# ============================================================
 networks:
   # app 网络：应用服务可访问外部（exposed ports）和内部服务
   app:
@@ -207,7 +244,13 @@ networks:
     driver: bridge
     internal: true
 
+# ============================================================
+# 持久化卷
+# ============================================================
 volumes:
   mysql_data:
+    name: storemicro-mysql-data
   redis_data:
+    name: storemicro-redis-data
   etcd_data:
+    name: storemicro-etcd-data

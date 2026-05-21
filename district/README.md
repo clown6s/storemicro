@@ -142,7 +142,7 @@ district/
 │   └── district_grpc.pb.go      # gRPC 服务端/客户端接口（protoc 生成）
 │
 ├── cmd/district/
-│   ├── main.go                  # 入口：loadDotenv → 配置 → logger → tracer → etcd → wireApp → 启动
+│   ├── main.go                  # 入口：配置 → logger → tracer → etcd → wireApp → 启动
 │   ├── wire.go                  # Wire 依赖注入声明
 │   └── wire_gen.go              # Wire 生成的注入代码（勿手动修改）
 │
@@ -165,7 +165,6 @@ district/
 │
 ├── configs/
 │   └── config.yaml              # 服务配置
-├── .env                         # 本地环境变量（gitignore）
 ├── Dockerfile                   # 多阶段构建
 ├── third_party/google/          # proto HTTP 注解依赖
 ├── go.mod
@@ -180,7 +179,7 @@ district/
 
 ### 配置加载流程
 
-与 user/gateway 一致：`loadDotenv()` → `envexpand` 单次正则展开 `${VAR:default}` → 加载 `config.yaml`。
+与 user/gateway 一致：`envexpand` 单次正则展开 `${VAR:default}` → 加载 `config.yaml`。
 
 ### 配置项
 
@@ -207,8 +206,7 @@ go run ./cmd/district/ -conf configs/config.yaml
 
 启动流程：
 
-1. `loadDotenv()` 加载 `.env`
-2. 通过 `envexpand` 加载配置
+1. 通过 `envexpand` 加载配置
 3. 初始化 zap logger
 4. 初始化 OTLP tracer
 5. 连接 etcd（带重试）→ 注册服务 `storemicro-district`

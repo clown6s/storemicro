@@ -66,8 +66,8 @@
 | 内部通信 | gRPC + Protobuf v3 | 服务间高性能 RPC |
 | 网关 | grpc-gateway v2 | REST JSON <-> gRPC 自动转换，proto 注解驱动路由 |
 | 服务发现 | etcd clientv3 | 注册、发现、雪花算法 node_id 分配 |
-| 数据库 | MySQL 8.0 | 数据持久化，事务支持，软删除 |
-| 缓存 | Redis 7 | token 双映射（单设备登录），Lua 原子脚本 |
+| 数据库 | MySQL 8.4 | 数据持久化，事务支持，软删除 |
+| 缓存 | Redis 8.6.2 | token 双映射（单设备登录），Lua 原子脚本 |
 | 认证 | JWT HS256 + Redis | 网关统一鉴权，Redis token 校验实现主动失效 |
 | ID 生成 | 雪花算法 | 基于 etcd 分布式锁自动分配 node_id（最多 1024 节点） |
 | 限流 | Redis + Lua 滑动窗口 | 按 IP + 路径限流，防暴力破解 |
@@ -84,15 +84,14 @@
 storemicro/                          # Go workspace (go.work)
 +-- gateway/                         # API 网关
 |   +-- cmd/gateway/
-|   |   +-- main.go                  # 启动入口，优雅关闭，gRPC drain，.env 加载
+|   |   +-- main.go                  # 启动入口，优雅关闭，gRPC drain
 |   +-- internal/
 |   |   +-- appconfig/appconfig.go   # 配置加载 + 环境变量展开 + 熔断/重试参数校验
 |   |   +-- auth/auth.go             # JWT 认证中间件 + Redis token 校验 + 限流 + CORS
 |   |   +-- circuitbreaker/          # gRPC 客户端熔断拦截器（按服务隔离）
 |   |   +-- proxy/proxy.go           # grpc-gateway 代理，etcd 服务发现，per-request 超时
 |   +-- api/                         # proto 生成代码（user/v1, district/v1）
-|   +-- configs/config.yaml          # 网关配置（所有密钥通过环境变量注入）
-|   +-- .env.example                 # 环境变量模板
+|   +-- configs/config.yaml          # 网关配置
 |   +-- Dockerfile                   # 多阶段构建 + HEALTHCHECK
 |
 +-- user/                            # 用户服务（Kratos 标准三层架构）
@@ -133,7 +132,7 @@ storemicro/                          # Go workspace (go.work)
 |   +-- zaplogger/zaplogger.go       # 共享 zap logger（Kratos 桥接 + dev/prod 模式）
 |   +-- retry/retry.go               # 通用重试（指数退避 + 随机抖动，MaxAttempts <= 10）
 |   +-- dbutil/dbutil.go             # 共享数据库连接池配置 + DSN 安全警告
-|   +-- cmdutil/cmdutil.go           # LoadDotenv + ResolveConfDir + MetricsBearerAuth
+|   +-- cmdutil/cmdutil.go           # ResolveConfDir + MetricsBearerAuth
 |   +-- envexpand/envexpand.go       # Kratos config.Source（环境变量展开，单次正则）
 |   +-- strutil/mask.go              # 手机号/邮箱脱敏工具
 |
@@ -228,7 +227,7 @@ storemicro/                          # Go workspace (go.work)
 | **请求体限制** | Gateway 限制 10MB，防止 OOM |
 | **Token 安全** | 长度 >4096 直接拒绝，Bearer 提取，Redis CAS 防并发竞态 |
 | **gRPC 超时** | Per-request 30s context timeout，防止后端慢请求拖垮网关 |
-| **密钥管理** | 所有密钥通过环境变量注入，.env 文件 gitignore，config.yaml 中无明文 |
+| **密钥管理** | config.yaml 管理配置，docker-compose environment 注入敏感值 |
 | **敏感信息** | 手机号脱敏输出，密码 hash 不跨层传播，DSN 禁止日志打印 |
 | **Metrics** | Prometheus 端点 Bearer token 认证保护（subtle.ConstantTimeCompare） |
 | **容器安全** | 非 root 用户运行（appuser:1000），多阶段构建最小镜像 |
@@ -255,7 +254,7 @@ Gateway 对后端 gRPC 调用实现服务级熔断（gobreaker）：
 | **邮箱清空** | 写 NULL 替代空字符串，避免 unique index 冲突 |
 | **District 环检测** | hasCycle 沿 parent 链检测循环引用 |
 | **CTE 防爆炸** | SELECT DISTINCT + LIMIT 10000 防重复 adcode 递归爆炸 |
-| **Docker HEALTHCHECK** | 三个服务均配置 curl 健康检查 |
+| **Docker HEALTHCHECK** | 三个服务均配置 wget 健康检查 |
 
 ### 可观测性
 
@@ -278,24 +277,18 @@ Jaeger UI 中可看到完整调用链：
 
 ### 配置管理
 
-采用 **环境变量 + .env + YAML** 三层配置策略：
+采用 **config.yaml + docker-compose environment** 两层配置策略：
 
-1. **config.yaml** -- 结构化配置，敏感值使用 `${VAR}` 或 `${VAR:default}` 占位
-2. **.env** -- 本地开发用，被 .gitignore 排除
-3. **环境变量** -- 生产/Docker 部署注入（docker-compose 的 ${VAR}）
-4. **loadDotenv()** -- 自动从配置目录 -> 当前目录加载 .env（不含 ../.env），不覆盖已有环境变量
-5. **单次正则展开** -- 自定义 expandEnv() 替代 os.ExpandEnv，避免密码含 $ 时被双重展开截断
-6. **HEALTH_PORT** -- 健康检查端口支持环境变量覆盖
+1. **config.yaml** -- 结构化配置，直接写入连接地址和密钥
+2. **docker-compose environment** -- 容器部署时覆盖配置值（IP、端口、密码等）
+3. **envexpand** -- 本地开发时 config.yaml 中的 `${VAR}` 会被环境变量展开
 
 ### 环境变量展开语法
 
 ```yaml
-# 必填（环境变量不存在则保留 ${VAR} 原文）
-jwt:
-  secret: "${JWT_SECRET}"
-
-# 带默认值（环境变量不存在则使用冒号后的默认值）
-metrics_password: "${METRICS_PASSWORD:}"
+# 可选带默认值（环境变量不存在则使用冒号后的默认值）
+redis:
+  addr: "${REDIS_HOST}:${REDIS_PORT:6379}"
 ```
 
 ## 请求处理链路
@@ -369,9 +362,7 @@ go install github.com/google/wire/cmd/wire@latest
 # 1. 启动依赖服务（etcd, MySQL, Redis）
 docker compose up -d mysql redis etcd
 
-# 2. 复制环境变量模板并填写
-cp gateway/.env.example gateway/.env
-# 编辑 gateway/.env、user/.env、district/.env
+# 2. 修改各服务的 configs/config.yaml，填入本地连接地址
 
 # 3. 启动 user 服务
 cd user && go run ./cmd/user/ -conf configs/config.yaml
@@ -386,11 +377,7 @@ cd gateway && go run ./cmd/gateway/ -conf configs/config.yaml
 ### 方式二：Docker Compose 一键部署
 
 ```bash
-# 设置环境变量
-export JWT_SECRET="your-jwt-secret-at-least-32-chars"
-export REDIS_PASSWORD="your-redis-password"
-export DB_PASSWORD="your-mysql-password"
-
+# 修改 docker-compose.yml 中的密码和密钥（YAML 锚点 &password, &jwt-secret）
 # 启动全部服务（docker-compose 依赖 service_healthy 确保启动顺序）
 docker compose up -d --build
 ```
@@ -511,6 +498,6 @@ etcdctl --endpoints=localhost:2379 get / --prefix --keys-only
 | `pkg/zaplogger` | 共享 zap logger 实现，Kratos log 桥接，dev/prod 模式切换 |
 | `pkg/retry` | 通用重试包（指数退避 + 随机抖动），用于 MySQL/Redis/etcd 连接重试 |
 | `pkg/dbutil` | 共享数据库连接池配置，DSN 安全警告 |
-| `pkg/cmdutil` | LoadDotenv + ResolveConfDir + MetricsBearerAuth |
+| `pkg/cmdutil` | ResolveConfDir + MetricsBearerAuth |
 | `pkg/envexpand` | Kratos config.Source 实现，加载 YAML 时自动展开环境变量 |
 | `pkg/strutil` | 手机号/邮箱脱敏工具 |
