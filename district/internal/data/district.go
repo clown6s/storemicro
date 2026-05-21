@@ -21,7 +21,7 @@ func NewDistrictRepo(data *Data) biz.DistrictRepo {
 func (d districtRepo) Get(ctx context.Context, adCode string) ([]*biz.District, error) {
 	var (
 		query string
-		args  []any
+		args  = make([]any, 0) // #23: 显式初始化空 slice，避免 nil 传递给 QueryContext
 	)
 
 	if adCode != "" {

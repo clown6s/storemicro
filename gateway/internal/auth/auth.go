@@ -3,7 +3,9 @@ package auth
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"net/http"
@@ -253,6 +255,13 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		tokenStr := authHeader
 		if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
 			tokenStr = strings.TrimSpace(authHeader[7:])
+		} else {
+			// #4: 仅接受 Bearer scheme，拒绝 Basic/Digest/其他
+			pkglog.L().Warn("jwt auth failed: non-Bearer Authorization scheme",
+				zap.String("path", cleaned),
+			)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid authorization scheme"}`)
+			return
 		}
 
 		// 拒绝过长的 token，防止 Redis key 爆炸
@@ -298,11 +307,12 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			return
 		}
 
-		// Redis token 验证使用独立超时，防止 Redis 慢查询卡住认证流程
+		// #3: Redis token 验证使用 SHA-256(token) 作为 key，避免 Redis 被攻破泄露原始 token
+		tokenHash := sha256Hex(tokenStr)
 		redisCtx, redisCancel := context.WithTimeout(r.Context(), 2*time.Second)
 		defer redisCancel()
 
-		val, err := rdb.Get(redisCtx, "storemicro:user:token:"+tokenStr).Result()
+		val, err := rdb.Get(redisCtx, "storemicro:user:token:"+tokenHash).Result()
 		if err == redis.Nil {
 			pkglog.L().Warn("jwt auth failed: token revoked (logged in elsewhere)",
 				zap.String("path", cleaned),
@@ -447,4 +457,10 @@ func maskIP(ip string) string {
 		return fmt.Sprintf("%x:%x:%x:%x:x:x:x:x", parsed[0], parsed[1], parsed[2], parsed[3])
 	}
 	return "masked"
+}
+
+// sha256Hex 计算 SHA-256 哈希并返回十六进制字符串
+func sha256Hex(s string) string {
+	h := sha256.Sum256([]byte(s))
+	return hex.EncodeToString(h[:])
 }

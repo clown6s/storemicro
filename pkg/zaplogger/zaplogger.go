@@ -207,7 +207,7 @@ func parseLevel(s string) zapcore.Level {
 
 // Validate 校验配置合法性，不合法时返回 error
 func Validate(cfg Config) error {
-	if cfg.Mode != "" && cfg.Mode != "dev" && cfg.Mode != "prod" {
+	if cfg.Mode != "" && !strings.EqualFold(cfg.Mode, "dev") && !strings.EqualFold(cfg.Mode, "prod") {
 		return fmt.Errorf("logger.mode must be 'dev' or 'prod', got: %s", cfg.Mode)
 	}
 	validLevels := map[string]bool{"debug": true, "info": true, "warn": true, "warning": true, "error": true}

@@ -123,7 +123,7 @@ func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv
 	}, nil
 }
 
-// extractTokenFromMetadata 从 gRPC metadata 提取 Bearer token
+// extractTokenFromMetadata 从 gRPC metadata 提取 Bearer token（仅接受 Bearer scheme）
 func extractTokenFromMetadata(ctx context.Context) string {
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -135,10 +135,10 @@ func extractTokenFromMetadata(ctx context.Context) string {
 		return ""
 	}
 	authHeader := values[0]
-	if strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-		return strings.TrimSpace(authHeader[7:])
+	if !strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+		return "" // 仅接受 Bearer scheme，拒绝 Basic/Digest/其他
 	}
-	return authHeader
+	return strings.TrimSpace(authHeader[7:])
 }
 
 // ListUsers 用户列表（分页）

@@ -54,8 +54,9 @@ func InitWithEtcd(etcdClient *clientv3.Client, serviceName string) error {
 	defer cancel()
 
 	// 批量获取已占用的节点 key，确定空闲节点列表
-	keyPrefix := fmt.Sprintf("%s%s/", keyPrefix, serviceName)
-	getResp, err := etcdClient.Get(ctx, keyPrefix, clientv3.WithPrefix())
+	// #24: 使用 serviceKeyPrefix 避免遮蔽包级常量 keyPrefix
+	serviceKeyPrefix := fmt.Sprintf("%s%s/", keyPrefix, serviceName)
+	getResp, err := etcdClient.Get(ctx, serviceKeyPrefix, clientv3.WithPrefix())
 	if err != nil {
 		return fmt.Errorf("snowflake: get existing nodes failed: %w", err)
 	}
@@ -277,15 +278,94 @@ func retryKeepAliveOnce(etcdClient *clientv3.Client, key string) bool {
 					readyMu.Lock()
 					nodeReady = false
 					readyMu.Unlock()
-					zap.L().Error("snowflake: re-acquired keep-alive lost again, GenID disabled - please restart instance")
+					// #2: 不再标记为永久死亡，后续 GenID 调用可触发新一轮重试
+					// 通过启动后台 goroutine 持续重试恢复
+					go retryRecover(etcdClient, key)
 					return true
 				}
 			}
 		}
 	}
 
-	zap.L().Error("snowflake: all re-acquire attempts exhausted, GenID permanently disabled - please restart instance")
+	zap.L().Error("snowflake: all re-acquire attempts exhausted, GenID temporarily disabled - will retry in background")
 	return false
+}
+
+// #2: retryRecover 后台持续重试恢复 snowflake node，避免 GenID 永久失效
+func retryRecover(etcdClient *clientv3.Client, key string) {
+	ctx := shutdownCtx
+	const maxBackoff = 30 * time.Second
+	backoff := 2 * time.Second
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+
+		lease, err := etcdClient.Grant(ctx, leaseTTL)
+		if err != nil {
+			zap.L().Error("snowflake: recover grant failed", zap.Error(err))
+			backoff = time.Duration(float64(backoff) * 1.5)
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		txn := etcdClient.Txn(ctx).
+			If(clientv3.Compare(clientv3.CreateRevision(key), "=", 0)).
+			Then(clientv3.OpPut(key, "1", clientv3.WithLease(lease.ID)))
+
+		resp, err := txn.Commit()
+		if err != nil || !resp.Succeeded {
+			if lease.ID != 0 {
+				_, _ = etcdClient.Revoke(ctx, lease.ID)
+			}
+			backoff = time.Duration(float64(backoff) * 1.5)
+			if backoff > maxBackoff {
+				backoff = maxBackoff
+			}
+			continue
+		}
+
+		ch, err := etcdClient.KeepAlive(ctx, lease.ID)
+		if err != nil {
+			_, _ = etcdClient.Revoke(ctx, lease.ID)
+			continue
+		}
+
+		readyMu.Lock()
+		newNode, nodeErr := sf.NewNode(NodeID)
+		if nodeErr != nil {
+			readyMu.Unlock()
+			_, _ = etcdClient.Revoke(ctx, lease.ID)
+			continue
+		}
+		node = newNode
+		nodeReady = true
+		readyMu.Unlock()
+
+		zap.L().Info("snowflake: recovered after keep-alive loss")
+
+		// 消费 keep-alive 通道
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case _, ok := <-ch:
+				if !ok {
+					readyMu.Lock()
+					nodeReady = false
+					readyMu.Unlock()
+					// 再次丢失，递归重试
+					go retryRecover(etcdClient, key)
+					return
+				}
+			}
+		}
+	}
 }
 
 // GenID 生成一个雪花 ID

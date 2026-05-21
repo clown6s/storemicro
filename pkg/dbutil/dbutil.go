@@ -67,8 +67,8 @@ func Connect(driver, dsn string, pool DefaultPoolConfig) (*sql.DB, error) {
 	db.SetConnMaxIdleTime(time.Duration(idleTime) * time.Second)
 
 	// [C5] 带可取消 context 的 MySQL 连接验证
-	// 注意：context timeout (30s) 是硬上限，可能在所有重试完成前到期
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// 注意：context timeout (60s) 是硬上限，可能在所有重试完成前到期
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
 	if err := pkgretry.Do(ctx, pkgretry.DefaultConfig(), "mysql",

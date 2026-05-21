@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	stdlog "log"
@@ -35,7 +36,7 @@ import (
 // go build -ldflags "-X main.Version=x.y.z"
 var (
 	Name     = "user"
-	Version  string
+	Version  = "dev" // #33: 构建时通过 -ldflags 覆盖，默认 "dev"
 	confPath string
 )
 
@@ -116,6 +117,9 @@ func main() {
 	zapLogger := pkglog.New(logCfg)
 	log.SetLogger(zapLogger)
 
+	// #28: 配置加载完成后恢复 stdlog 输出，避免全局抑制第三方包日志
+	stdlog.SetOutput(os.Stderr)
+
 	helper := log.NewHelper(zapLogger)
 	helper.Infow("msg", "service initializing",
 		"name", Name, "version", Version,
@@ -189,8 +193,13 @@ func main() {
 	helper.Infow("msg", "service started", "name", Name)
 
 	// 健康检查 HTTP sidecar（默认 :9101，可通过 HEALTH_PORT 环境变量覆盖）
-	healthAddr := ":9101"
+	const defaultHealthPort = ":9101" // #30: 提取为常量
+	healthAddr := defaultHealthPort
 	if hp := os.Getenv("HEALTH_PORT"); hp != "" {
+		// #11: 校验端口格式，至少包含数字或冒号
+		if !strings.Contains(hp, ":") {
+			hp = ":" + hp // 兼容纯端口号格式（如 "9101"）
+		}
 		healthAddr = hp
 	}
 	healthSrv := startHealthServer(healthAddr, helper, appData)

@@ -69,6 +69,13 @@ func (r *userRepo) GetByPhone(ctx context.Context, phone string) (*biz.User, err
 	return user, nil
 }
 
+// #21: 排序字段白名单（包级变量，避免每次请求重建）
+var allowedSortBy = map[string]string{
+	"id":         "id",
+	"createTime": "create_time",
+	"updateTime": "update_time",
+}
+
 func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, sortBy, sortOrder string) ([]*biz.User, int64, error) {
 	zap.L().Debug("userRepo.List",
 		zap.Int32("page", page), zap.Int32("pageSize", pageSize),
@@ -116,12 +123,7 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, 
 		return nil, 0, fmt.Errorf("count users failed: %w", err)
 	}
 
-	// 排序参数白名单校验（防止 SQL 注入）
-	allowedSortBy := map[string]string{
-		"id":         "id",
-		"createTime": "create_time",
-		"updateTime": "update_time",
-	}
+	// 排序参数白名单校验（防止 SQL 注入，使用包级 allowedSortBy）
 	sortCol, ok := allowedSortBy[sortBy]
 	if !ok {
 		sortCol = "id" // 默认按 id 排序
@@ -335,7 +337,8 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 	}()
 
 	// [Fix] 清理同手机号/邮箱的软删除记录，避免唯一键冲突
-	// 软删除的记录不可恢复，释放手机号/邮箱供新用户注册
+	// 注意：此处使用硬删除（DELETE），前提是系统中无外键引用 user.id 的关联表。
+	// 如果未来添加了订单表等引用 user.id 的表，应改为 UPDATE 将 phone/email 置空。
 	if _, err := tx.ExecContext(ctx,
 		`DELETE FROM user WHERE phone = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Phone,
 	); err != nil {
@@ -381,12 +384,24 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 	if err != nil {
 		return fmt.Errorf("generate snowflake id failed: %w", err)
 	}
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO user (id, password, real_name, avatar, gender, age, phone, email, remark)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, user.Password, user.RealName, user.Avatar, user.Gender, user.Age,
-		user.Phone, user.Email, user.Remark,
-	)
+
+	// #17: 未提供 email 时写入 NULL，避免空字符串触发唯一索引冲突
+	// #19: 显式设置 create_time/update_time，不依赖数据库 DEFAULT 值
+	now := time.Now().UTC().Format(time.RFC3339)
+	var insertSQL string
+	var insertArgs []any
+	if user.Email == "" {
+		insertSQL = `INSERT INTO user (id, password, real_name, avatar, gender, age, phone, remark, create_time, update_time)
+		             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		insertArgs = []any{id, user.Password, user.RealName, user.Avatar, user.Gender, user.Age,
+			user.Phone, user.Remark, now, now}
+	} else {
+		insertSQL = `INSERT INTO user (id, password, real_name, avatar, gender, age, phone, email, remark, create_time, update_time)
+		             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+		insertArgs = []any{id, user.Password, user.RealName, user.Avatar, user.Gender, user.Age,
+			user.Phone, user.Email, user.Remark, now, now}
+	}
+	_, err = tx.ExecContext(ctx, insertSQL, insertArgs...)
 	if err != nil {
 		// 捕获唯一索引冲突（errno 1062），映射为业务错误
 		var mysqlErr *mysql.MySQLError

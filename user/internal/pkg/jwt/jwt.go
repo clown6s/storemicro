@@ -28,8 +28,8 @@ func NewJWT(secret string, expireHrs int64) *JWT {
 	if expireHrs <= 0 {
 		panic("jwt expire_hours must be positive")
 	}
-	if expireHrs > 8760 {
-		panic("jwt expire_hours too large (max 8760 = 1 year)")
+	if expireHrs > 24 {
+		panic("jwt expire_hours too large (max 24 = 1 day)")
 	}
 	return &JWT{
 		secret:    []byte(secret),

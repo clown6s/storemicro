@@ -33,6 +33,7 @@ type GrpcClientConfig struct {
 	CircuitBreaker      CircuitBreakerConfig `yaml:"circuit_breaker"`
 	MaxRecvMsgSize      int                  `yaml:"max_recv_msg_size"` // MB
 	MaxSendMsgSize      int                  `yaml:"max_send_msg_size"` // MB
+	RequestTimeout      time.Duration        `yaml:"request_timeout"`   // 单次 gRPC 请求超时，默认 30s
 }
 
 // HealthCheckConfig gRPC 客户端健康检查配置
@@ -80,6 +81,8 @@ type ServerConfig struct {
 type EtcdConfig struct {
 	Endpoints   []string      `yaml:"endpoints"`
 	DialTimeout time.Duration `yaml:"dial_timeout"`
+	Username    string        `yaml:"username"` // etcd 认证用户名（可选）
+	Password    string        `yaml:"password"` // etcd 认证密码（可选）
 }
 
 // LogConfig 日志配置
@@ -95,13 +98,13 @@ type LogConfig struct {
 
 // JwtConfig JWT 配置
 type JwtConfig struct {
-	Secret string `yaml:"secret"`
+	Secret string `yaml:"secret" json:"-"`
 }
 
 // RedisConfig Redis 配置
 type RedisConfig struct {
 	Addr     string `yaml:"addr"`
-	Password string `yaml:"password"`
+	Password string `yaml:"password" json:"-"`
 	Db       int    `yaml:"db"`
 }
 
@@ -116,6 +119,7 @@ func DefaultAppConfig() *AppConfig {
 		},
 		GrpcClient: GrpcClientConfig{
 			LoadBalancingPolicy: "round_robin",
+			RequestTimeout:      30 * time.Second,
 			HealthCheck: HealthCheckConfig{
 				Enabled:  true,
 				Interval: 10 * time.Second,
@@ -220,6 +224,10 @@ func Load(path string) (*AppConfig, error) {
 		return nil, fmt.Errorf("tracing.sample_rate must be between 0.0 and 1.0, got %.2f", cfg.Tracing.SampleRate)
 	}
 
+	if cfg.GrpcClient.RequestTimeout <= 0 {
+		cfg.GrpcClient.RequestTimeout = 30 * time.Second
+	}
+
 	// 校验 gRPC 客户端配置
 	if err := validateGrpcClient(&cfg.GrpcClient); err != nil {
 		return nil, err
@@ -280,8 +288,8 @@ func validateGrpcClient(c *GrpcClientConfig) error {
 	if c.CircuitBreaker.FailureRatio < 0 || c.CircuitBreaker.FailureRatio > 1 {
 		return fmt.Errorf("grpc_client.circuit_breaker.failure_ratio must be between 0.0 and 1.0, got %.2f", c.CircuitBreaker.FailureRatio)
 	}
-	if c.CircuitBreaker.MaxRequests < 0 {
-		return fmt.Errorf("grpc_client.circuit_breaker.max_requests must be >= 0, got %d", c.CircuitBreaker.MaxRequests)
+	if c.CircuitBreaker.MaxRequests < 1 {
+		return fmt.Errorf("grpc_client.circuit_breaker.max_requests must be >= 1, got %d", c.CircuitBreaker.MaxRequests)
 	}
 	if c.CircuitBreaker.MinRequests < 0 {
 		return fmt.Errorf("grpc_client.circuit_breaker.min_requests must be >= 0, got %d", c.CircuitBreaker.MinRequests)

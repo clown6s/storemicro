@@ -36,23 +36,25 @@ type ServiceRegistration struct {
 
 // Proxy 封装 grpc-gateway mux 和 gRPC 连接
 type Proxy struct {
-	mux         *runtime.ServeMux
-	conns       []*grpc.ClientConn
-	etcdClient  *clientv3.Client
-	rdb         *redis.Client
-	jwtSecret   string
-	origins     []string
-	proxies     []string
-	otelHandler http.Handler
-	closeOnce   sync.Once // #14: 防止 Close 被重复调用
+	mux            *runtime.ServeMux
+	conns          []*grpc.ClientConn
+	etcdClient     *clientv3.Client
+	rdb            *redis.Client
+	jwtSecret      string
+	origins        []string
+	proxies        []string
+	otelHandler    http.Handler
+	requestTimeout time.Duration // 单次 gRPC 请求超时
+	closeOnce      sync.Once     // #14: 防止 Close 被重复调用
 }
 
 // New 创建 grpc-gateway 代理
 func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, error) {
 	p := &Proxy{
-		jwtSecret: cfg.Jwt.Secret,
-		origins:   cfg.Server.AllowOrigins,
-		proxies:   cfg.Server.TrustedProxies,
+		jwtSecret:      cfg.Jwt.Secret,
+		origins:        cfg.Server.AllowOrigins,
+		proxies:        cfg.Server.TrustedProxies,
+		requestTimeout: cfg.GrpcClient.RequestTimeout,
 	}
 
 	// 创建 Redis 客户端（连接池配置）
@@ -96,6 +98,8 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 			etcdClient, err = clientv3.New(clientv3.Config{
 				Endpoints:   cfg.Etcd.Endpoints,
 				DialTimeout: cfg.Etcd.DialTimeout,
+				Username:    cfg.Etcd.Username,
+				Password:    cfg.Etcd.Password,
 			})
 			return err
 		},
@@ -183,8 +187,8 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 
 // ServeHTTP 实现 http.Handler 接口
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// 为每个请求设置独立的 gRPC 超时，防止后端挂起时阻塞到 HTTP WriteTimeout
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	// 为每个请求设置独立的 gRPC 超时（从配置读取），防止后端挂起时阻塞到 HTTP WriteTimeout
+	ctx, cancel := context.WithTimeout(r.Context(), p.requestTimeout)
 	defer cancel()
 	p.otelHandler.ServeHTTP(w, r.WithContext(ctx))
 }

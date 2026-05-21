@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	pkgtracing "github.com/storemicro/pkg/tracing"
 	pkglog "github.com/storemicro/pkg/zaplogger"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 
 	"gateway/internal/appconfig"
@@ -142,27 +144,21 @@ func main() {
 		pkglog.L().Error("gateway forced shutdown", zap.Error(err))
 	}
 
-	// #15: 等待 in-flight gRPC 请求 drain（最多 5 秒）
+	// #15: 等待 in-flight gRPC 请求 drain（并行等待，最多 5 秒）
 	drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer drainCancel()
+	var drainWg sync.WaitGroup
 	for _, conn := range proxy.Conns() {
-		select {
-		case <-drainCtx.Done():
-			pkglog.L().Warn("gRPC drain timed out, forcing close")
-			goto closeProxy
-		default:
-		}
-		if !conn.WaitForStateChange(drainCtx, connectivity.Ready) {
-			// context 超时，连接状态未变化
+		if conn == nil {
 			continue
 		}
-		// 状态已从 Ready 变化，检查当前状态决定是否等待更多
-		state := conn.GetState()
-		if state == connectivity.Shutdown || state == connectivity.TransientFailure {
-			continue // 连接已关闭或故障，无需等待
-		}
+		drainWg.Add(1)
+		go func(c *grpc.ClientConn) {
+			defer drainWg.Done()
+			c.WaitForStateChange(drainCtx, connectivity.Ready)
+		}(conn)
 	}
-closeProxy:
+	drainWg.Wait()
 	proxy.Close()
 
 	pkglog.L().Info("gateway stopped")

@@ -67,18 +67,23 @@ var (
 )
 
 // [C3] 用于 timing-safe login 的 dummy bcrypt hash（cost=10, 随机 salt）
-// 使用 lazy init 替代 init()，避免 init panic 无法被调用方捕获
+// #18: 使用 lazy init + 重试，避免 sync.Once 首次失败后永久失效
 var dummyHash []byte
 var dummyHashOnce sync.Once
 var dummyHashErr error
 
-// getDummyHash 延迟生成 dummy hash（仅在首次 Login 时调用）
+// getDummyHash 延迟生成 dummy hash（仅在首次 Login 时调用），失败时重试最多 3 次
 func getDummyHash() []byte {
 	dummyHashOnce.Do(func() {
-		dummyHash, dummyHashErr = bcrypt.GenerateFromPassword([]byte("dummy-timing-safe-hash"), bcrypt.DefaultCost)
-		if dummyHashErr != nil {
-			zap.L().Error("failed to generate dummy bcrypt hash for timing-safe login", zap.Error(dummyHashErr))
+		for attempt := 1; attempt <= 3; attempt++ {
+			dummyHash, dummyHashErr = bcrypt.GenerateFromPassword([]byte("dummy-timing-safe-hash"), bcrypt.DefaultCost)
+			if dummyHashErr == nil {
+				return
+			}
+			zap.L().Error("failed to generate dummy bcrypt hash, retrying",
+				zap.Int("attempt", attempt), zap.Int("max", 3), zap.Error(dummyHashErr))
 		}
+		zap.L().Error("failed to generate dummy bcrypt hash after 3 attempts, timing-safe login disabled")
 	})
 	return dummyHash
 }
