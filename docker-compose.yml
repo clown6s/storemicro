@@ -146,6 +146,9 @@ services:
       --data-dir /data
       --listen-client-urls http://0.0.0.0:2379
       --advertise-client-urls http://etcd:2379
+      --listen-peer-urls http://0.0.0.0:2380
+      --initial-advertise-peer-urls http://etcd:2380
+      --initial-cluster etcd=http://etcd:2380
       --auto-compaction-retention=1h
       --auto-compaction-mode=periodic
       --snapshot-count=10000
@@ -163,11 +166,11 @@ services:
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:2379/health"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 10s
+      retries: 5
+      start_period: 15s
     logging: *logging
     networks:
       - internal
