@@ -58,9 +58,8 @@ services:
       - --log-queries-not-using-indexes=1
       - --sql-mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
       - --local-infile=0
-    # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
-    # ports:
-    #   - "3306:3306"
+    ports:
+      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     restart: always
@@ -81,6 +80,7 @@ services:
     logging: *logging
     networks:
       - internal
+      - app
 
   redis:
     image: redis:8.6.2
@@ -106,9 +106,8 @@ services:
       - "300"
       - --timeout
       - "0"
-    # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
-    # ports:
-    #   - "6379:6379"
+    ports:
+      - "6379:6379"
     volumes:
       - redis_data:/data
     restart: always
@@ -129,6 +128,7 @@ services:
     logging: *logging
     networks:
       - internal
+      - app
 
   etcd:
     image: quay.io/coreos/etcd:v3.6.9
