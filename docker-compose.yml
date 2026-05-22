@@ -187,7 +187,7 @@ services:
       dockerfile: user/Dockerfile
     container_name: storemicro-user
     ports:
-      - "9101:9101"
+      - "6001:9101"
       # gRPC :9001 仅容器内通信，不映射宿主机
     environment:
       TZ: *timezone
@@ -244,7 +244,7 @@ services:
       dockerfile: district/Dockerfile
     container_name: storemicro-district
     ports:
-      - "9103:9103"
+      - "6002:9103"
       # gRPC :9003 仅容器内通信，不映射宿主机
     environment:
       TZ: *timezone
@@ -295,7 +295,7 @@ services:
       dockerfile: gateway/Dockerfile
     container_name: storemicro-gateway
     ports:
-      - "8080:8080"
+      - "7000:8080"
     environment:
       TZ: *timezone
       JWT_SECRET: *jwt-secret
