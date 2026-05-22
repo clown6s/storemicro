@@ -3,6 +3,9 @@ FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache git
 
+# China Go module proxy
+ENV GOPROXY=https://goproxy.cn,direct
+
 WORKDIR /app
 
 # Copy go.mod files for dependency caching
@@ -12,13 +15,18 @@ COPY pkg/ ./pkg/
 # Generate go.work for Docker build (host go.work is excluded by .dockerignore)
 RUN printf 'go 1.26.1\nuse (\n  .\n  ./pkg/cmdutil\n  ./pkg/dbutil\n  ./pkg/envexpand\n  ./pkg/health\n  ./pkg/retry\n  ./pkg/tracing\n  ./pkg/zaplogger\n)\n' > go.work
 
-RUN go mod download
+# Download dependencies — cache mounted so subsequent builds reuse downloaded modules
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
 
 # Copy service source
 COPY district/ .
 
 # Production build: strip debug info + remove file paths
-RUN CGO_ENABLED=0 GOOS=linux \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux \
     go build -trimpath \
     -ldflags "-s -w -buildid=" \
     -o /bin/district ./cmd/district
