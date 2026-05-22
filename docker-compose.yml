@@ -120,7 +120,7 @@ services:
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$REDISCLI_AUTH\" ping | grep PONG"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -166,11 +166,11 @@ services:
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:2379/health"]
+      test: ["CMD", "etcdctl", "endpoint", "health", "--endpoints=http://localhost:2379"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 30s
     logging: *logging
     networks:
       - internal
