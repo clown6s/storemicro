@@ -44,23 +44,23 @@ services:
       TZ: *timezone
       MYSQL_ROOT_PASSWORD: *password
       MYSQL_DATABASE: store_micro
-    command: >
-      --character-set-server=utf8mb4
-      --collation-server=utf8mb4_unicode_ci
-      --skip-character-set-client-handshake
-      --default-authentication-plugin=caching_sha2_password
-      --skip-name-resolve
-      --skip-host-cache
-      --max-connections=200
-      --innodb-buffer-pool-size=256M
-      --innodb-flush-log-at-trx-commit=1
-      --innodb-flush-method=O_DIRECT
-      --sync-binlog=1
-      --slow-query-log=1
-      --long-query-time=2
-      --log-queries-not-using-indexes=1
-      --sql-mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
-      --local-infile=0
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+      - --default-authentication-plugin=caching_sha2_password
+      - --skip-name-resolve
+      - --skip-host-cache
+      - --max-connections=200
+      - --innodb-buffer-pool-size=256M
+      - --innodb-flush-log-at-trx-commit=1
+      - --innodb-flush-method=O_DIRECT
+      - --sync-binlog=1
+      - --slow-query-log=1
+      - --long-query-time=2
+      - --log-queries-not-using-indexes=1
+      - --sql-mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+      - --local-infile=0
     # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
     # ports:
     #   - "3306:3306"
@@ -91,20 +91,36 @@ services:
     environment:
       TZ: *timezone
       REDISCLI_AUTH: *password
-    command: >
-      redis-server
-      --requirepass "CHANGE_ME_STRONG_PASSWORD_32CHARS_MIN"
-      --appendonly yes
-      --appendfsync everysec
-      --maxmemory 192mb
-      --maxmemory-policy allkeys-lru
-      --rename-command FLUSHALL ""
-      --rename-command FLUSHDB ""
-      --rename-command DEBUG ""
-      --rename-command CONFIG ""
-      --hz 100
-      --tcp-keepalive 300
-      --timeout 0
+    command:
+      - redis-server
+      - --requirepass
+      - "CHANGE_ME_STRONG_PASSWORD_32CHARS_MIN"
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - "everysec"
+      - --maxmemory
+      - "192mb"
+      - --maxmemory-policy
+      - "allkeys-lru"
+      - --rename-command
+      - "FLUSHALL"
+      - '""'
+      - --rename-command
+      - "FLUSHDB"
+      - '""'
+      - --rename-command
+      - "DEBUG"
+      - '""'
+      - --rename-command
+      - "CONFIG"
+      - '""'
+      - --hz
+      - "100"
+      - --tcp-keepalive
+      - "300"
+      - --timeout
+      - "0"
     # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
     # ports:
     #   - "6379:6379"
@@ -140,20 +156,30 @@ services:
     # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
     # ports:
     #   - "2379:2379"
-    command: >
-      /usr/local/bin/etcd
-      --name etcd
-      --data-dir /data
-      --listen-client-urls http://0.0.0.0:2379
-      --advertise-client-urls http://etcd:2379
-      --listen-peer-urls http://0.0.0.0:2380
-      --initial-advertise-peer-urls http://etcd:2380
-      --initial-cluster etcd=http://etcd:2380
-      --auto-compaction-retention=1h
-      --auto-compaction-mode=periodic
-      --snapshot-count=10000
-      --quota-backend-bytes=2147483648
-      --max-request-bytes=1048576
+    command:
+      - --name
+      - "etcd"
+      - --data-dir
+      - "/data"
+      - --listen-client-urls
+      - "http://0.0.0.0:2379"
+      - --advertise-client-urls
+      - "http://etcd:2379"
+      - --listen-peer-urls
+      - "http://0.0.0.0:2380"
+      - --initial-advertise-peer-urls
+      - "http://etcd:2380"
+      - --initial-cluster
+      - "etcd=http://etcd:2380"
+      - --auto-compaction-retention=1h
+      - --auto-compaction-mode
+      - "periodic"
+      - --snapshot-count
+      - "10000"
+      - --quota-backend-bytes
+      - "2147483648"
+      - --max-request-bytes
+      - "1048576"
     volumes:
       - etcd_data:/data
     restart: always
