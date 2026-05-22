@@ -14,6 +14,7 @@ import (
 	"github.com/go-sql-driver/mysql"
 	pkgstr "github.com/storemicro/pkg/strutil"
 	"go.uber.org/zap"
+	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
@@ -92,6 +93,9 @@ func (r *userRepo) GetByPhone(ctx context.Context, phone string) (*biz.User, err
 	return user, nil
 }
 
+// bcryptCost bcrypt 加密 cost 因子（应与 biz 包保持一致）
+const bcryptCost = 12
+
 // #21: 排序字段白名单（包级变量，避免每次请求重建）
 var allowedSortBy = map[string]string{
 	"id":         "id",
@@ -127,9 +131,10 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, 
 
 	if phone != "" {
 		conditions = append(conditions, "phone LIKE ? ESCAPE '\\\\'")
-		args = append(args, "%"+escapeLike(phone)+"%")
+		args = append(args, escapeLike(phone)+"%")
 	}
 	if name != "" {
+		// 姓名需要模糊搜索，%xxx% 是有意为之（用户可能输入姓名的部分字符）
 		conditions = append(conditions, "real_name LIKE ? ESCAPE '\\\\'")
 		args = append(args, "%"+escapeLike(name)+"%")
 	}
@@ -292,6 +297,10 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 		return biz.ErrNothingToUpdate
 	}
 
+	// 显式设置 update_time（与 RegisterTx 一致，不依赖数据库 DEFAULT 值）
+	setClauses = append(setClauses, "update_time = ?")
+	args = append(args, time.Now().UTC().Format(time.RFC3339))
+
 	args = append(args, user.ID)
 	query := fmt.Sprintf("UPDATE user SET %s WHERE id = ? AND (deleted_at IS NULL OR deleted_at = '')", strings.Join(setClauses, ", "))
 
@@ -378,47 +387,44 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 		}
 	}()
 
-	// [Fix] 清理同手机号/邮箱的软删除记录，避免唯一键冲突
-	// 注意：此处使用硬删除（DELETE），前提是系统中无外键引用 user.id 的关联表。
-	// 如果未来添加了订单表等引用 user.id 的表，应改为 UPDATE 将 phone/email 置空。
+	// [Fix] 清理同手机号/邮箱的软删除记录（清空唯一键字段，避免唯一键冲突）
+	// 使用 UPDATE 将 phone/email 置 NULL 而非硬删除，保留历史记录用于审计
 	if _, err := tx.ExecContext(ctx,
-		`DELETE FROM user WHERE phone = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Phone,
+		`UPDATE user SET phone = NULL, email = NULL WHERE phone = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Phone,
 	); err != nil {
 		return fmt.Errorf("cleanup soft-deleted phone records failed: %w", err)
 	}
 	if user.Email != "" {
-		// 清理所有软删除记录中同邮箱的记录（不限定手机号，防止跨手机号邮箱重用导致唯一键冲突）
 		if _, err := tx.ExecContext(ctx,
-			`DELETE FROM user WHERE email = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Email,
+			`UPDATE user SET email = NULL WHERE email = ? AND deleted_at IS NOT NULL AND deleted_at != ''`, user.Email,
 		); err != nil {
 			return fmt.Errorf("cleanup soft-deleted email records failed: %w", err)
 		}
 	}
 
-	// 手机号唯一性检查（SELECT FOR UPDATE 锁行，防止并发）
-	var phoneCount int
-	err = tx.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM user WHERE phone = ? AND (deleted_at IS NULL OR deleted_at = '') FOR UPDATE`, user.Phone,
-	).Scan(&phoneCount)
+	// 统一性检查：使用 ORDER BY id 保证一致的加锁顺序，防止并发注册时的死锁
+	// 例如 (phone=A,email=B) 和 (phone=B,email=A) 并发时，都按 id 排序加锁
+	var phoneCount, emailCount int
+	checkSQL := `SELECT
+		SUM(CASE WHEN phone = ? THEN 1 ELSE 0 END),
+		COUNT(CASE WHEN ? != '' AND email = ? THEN 1 END)
+	FROM user
+	WHERE (phone = ? OR (? != '' AND email = ?))
+	  AND (deleted_at IS NULL OR deleted_at = '')
+	ORDER BY id
+	FOR UPDATE`
+	err = tx.QueryRowContext(ctx, checkSQL,
+		user.Phone, user.Email, user.Email,
+		user.Phone, user.Email, user.Email,
+	).Scan(&phoneCount, &emailCount)
 	if err != nil {
-		return fmt.Errorf("check phone failed: %w", err)
+		return fmt.Errorf("check uniqueness failed: %w", err)
 	}
 	if phoneCount > 0 {
 		return biz.ErrPhoneExists
 	}
-
-	// 邮箱唯一性检查（如果提供了邮箱）
-	if user.Email != "" {
-		var emailCount int
-		err = tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM user WHERE email = ? AND (deleted_at IS NULL OR deleted_at = '') FOR UPDATE`, user.Email,
-		).Scan(&emailCount)
-		if err != nil {
-			return fmt.Errorf("check email failed: %w", err)
-		}
-		if emailCount > 0 {
-			return biz.ErrEmailExists
-		}
+	if user.Email != "" && emailCount > 0 {
+		return biz.ErrEmailExists
 	}
 
 	// 生成 ID 并写入
@@ -476,21 +482,60 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 	return nil
 }
 
-func (r *userRepo) UpdatePassword(ctx context.Context, id int64, hashedPassword string) error {
-	result, err := r.data.db.ExecContext(ctx,
-		`UPDATE user SET password = ?, update_time = ? WHERE id = ? AND (deleted_at IS NULL OR deleted_at = '')`,
-		hashedPassword, time.Now().UTC().Format(time.RFC3339), id,
+// ChangePasswordTx 事务修改密码：在同一个事务内读取旧密码 → 校验 → 更新（防止 TOCTOU 竞态）
+func (r *userRepo) ChangePasswordTx(ctx context.Context, userID int64, oldPassword, newPassword string) error {
+	tx, err := r.data.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin tx failed: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			if err := tx.Rollback(); err != nil {
+				zap.L().Error("ChangePasswordTx rollback failed", zap.Error(err))
+			}
+		}
+	}()
+
+	// SELECT password FOR UPDATE（锁定行，防止并发修改）
+	var currentHash string
+	err = tx.QueryRowContext(ctx,
+		"SELECT password FROM user WHERE id = ? AND (deleted_at IS NULL OR deleted_at = '') FOR UPDATE", userID,
+	).Scan(&currentHash)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return biz.ErrUserNotFound
+		}
+		return fmt.Errorf("query password failed: %w", err)
+	}
+
+	// bcrypt 比对旧密码
+	if err := bcrypt.CompareHashAndPassword([]byte(currentHash), []byte(oldPassword)); err != nil {
+		return biz.ErrWrongOldPassword
+	}
+
+	// 哈希新密码
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcryptCost)
+	if err != nil {
+		return fmt.Errorf("bcrypt hash failed: %w", err)
+	}
+
+	// UPDATE password + update_time
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := tx.ExecContext(ctx,
+		"UPDATE user SET password = ?, update_time = ? WHERE id = ? AND (deleted_at IS NULL OR deleted_at = '')",
+		string(hashedPwd), now, userID,
 	)
 	if err != nil {
-		zap.L().Error("userRepo.UpdatePassword failed", zap.Int64("id", id), zap.Error(err))
 		return fmt.Errorf("update password failed: %w", err)
 	}
-	affected, raErr := result.RowsAffected()
-	if raErr != nil {
-		return fmt.Errorf("get rows affected failed: %w", raErr)
-	}
-	if affected == 0 {
+	if affected, _ := result.RowsAffected(); affected == 0 {
 		return biz.ErrUserNotFound
 	}
+
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit tx failed: %w", err)
+	}
+	committed = true
 	return nil
 }

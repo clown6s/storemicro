@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 	pkglog "github.com/storemicro/pkg/zaplogger"
 	"go.uber.org/zap"
@@ -33,6 +34,21 @@ func RecoverMiddleware(next http.Handler) http.Handler {
 				writeJSON(w, http.StatusInternalServerError, `{"code":500,"message":"internal server error"}`)
 			}
 		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// RequestIDMiddleware 生成或传递 X-Request-Id 请求追踪 ID
+func RequestIDMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reqID := r.Header.Get("X-Request-Id")
+		if reqID == "" {
+			reqID = uuid.New().String()
+		} else if len(reqID) > 128 || strings.ContainsAny(reqID, "\r\n") {
+			// 拒绝过长或含换行的 request ID，防止日志注入和追踪污染
+			reqID = uuid.New().String()
+		}
+		w.Header().Set("X-Request-Id", reqID)
 		next.ServeHTTP(w, r)
 	})
 }
@@ -125,6 +141,10 @@ func isAllowedOrigin(origin string, allowed map[string]struct{}) bool {
 			continue // 跨协议不允许匹配
 		}
 		domain := aURL.Hostname()
+		// 通配符匹配应仅匹配默认端口，非默认端口已在精确匹配分支处理
+		if originURL.Host != aURL.Host && originURL.Port() != "" {
+			continue
+		}
 		if !strings.HasPrefix(domain, "*.") {
 			continue
 		}
@@ -150,8 +170,9 @@ const ContextKeyUserID contextKey = "user_id"
 
 // NoAuthRoutes 免认证路由白名单
 var NoAuthRoutes = map[string]struct{}{
-	"POST /api/v1/user/register": {},
-	"POST /api/v1/user/login":    {},
+	"POST /api/v1/user/register":      {},
+	"POST /api/v1/user/login":         {},
+	"POST /api/v1/user/refresh-token": {},
 }
 
 // RateLimitScript Lua 脚本原子化限流操作
@@ -229,7 +250,8 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 		cleaned := path.Clean(rawPath)
 		route := routeKey(r.Method, cleaned)
 
-		if isNoAuthRoute(r.Method, rawPath) {
+		_, noAuth := NoAuthRoutes[route]
+		if noAuth {
 			if limiter, ok := rateLimitRoutes[route]; ok {
 				ip := extractIP(r, trustedProxies)
 				if !limiter.Allow(r.Context(), "storemicro:rl:"+cleaned+":"+ip) {
@@ -297,6 +319,17 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			return
 		}
 
+		// Medium #2: 校验 Subject 存在且与 UserID 一致，防止伪造 sub claim
+		if c.Subject == "" || c.Subject != strconv.FormatInt(c.UserID, 10) {
+			pkglog.L().Warn("jwt auth failed: invalid subject",
+				zap.String("path", cleaned),
+				zap.Int64("user_id", c.UserID),
+				zap.String("subject", c.Subject),
+			)
+			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"invalid token"}`)
+			return
+		}
+
 		// #11: 显式校验 token 过期时间（即使 Redis TTL 兜底也不应接受无 exp 的 token）
 		if c.ExpiresAt == nil || c.ExpiresAt.Before(time.Now()) {
 			pkglog.L().Warn("jwt auth failed: token expired or missing exp",
@@ -352,11 +385,6 @@ func routeKey(method, path string) string {
 	return method + " " + path
 }
 
-// IsNoAuthRoute 检查请求是否在免认证白名单中
-func IsNoAuthRoute(method, rawPath string) bool {
-	return isNoAuthRoute(method, rawPath)
-}
-
 func isNoAuthRoute(method, rawPath string) bool {
 	// r.URL.Path 已经被 net/http 自动 decode，直接 Clean 即可
 	// 不能再调 url.PathUnescape，否则 double decode 导致安全绕过
@@ -372,11 +400,6 @@ func writeJSON(w http.ResponseWriter, code int, body string) {
 	_, _ = w.Write([]byte(body))
 }
 
-// ExtractIP 从请求中提取客户端 IP（支持可信代理 X-Forwarded-For）
-func ExtractIP(r *http.Request, trustedProxies []string) string {
-	return extractIP(r, trustedProxies)
-}
-
 func extractIP(r *http.Request, trustedProxies []string) string {
 	remoteHost, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
@@ -386,6 +409,7 @@ func extractIP(r *http.Request, trustedProxies []string) string {
 	if isTrustedProxy(remoteHost, trustedProxies) {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 			ips := strings.Split(xff, ",")
+			// 从右往左找第一个非可信代理 IP（最接近客户端的真实 IP）
 			for i := len(ips) - 1; i >= 0; i-- {
 				ip := strings.TrimSpace(ips[i])
 				if ip == "" || net.ParseIP(ip) == nil {
@@ -395,12 +419,7 @@ func extractIP(r *http.Request, trustedProxies []string) string {
 					return ip
 				}
 			}
-			for _, ip := range ips {
-				ip = strings.TrimSpace(ip)
-				if ip != "" && net.ParseIP(ip) != nil {
-					return ip
-				}
-			}
+			// 所有 IP 都是可信代理，无法确定客户端 IP，fallback 到直连 IP
 		}
 		if rip := r.Header.Get("X-Real-IP"); rip != "" {
 			rip = strings.TrimSpace(rip)
@@ -438,11 +457,6 @@ func isTrustedProxy(ip string, trustedProxies []string) bool {
 		}
 	}
 	return false
-}
-
-// MaskIP 脱敏 IP 地址：保留前两个八位组，隐藏后两部分 (GDPR 合规)
-func MaskIP(ip string) string {
-	return maskIP(ip)
 }
 
 func maskIP(ip string) string {

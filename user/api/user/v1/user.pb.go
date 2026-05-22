@@ -433,6 +433,7 @@ type LoginResp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
 	Data          *UserInfo              `protobuf:"bytes,2,opt,name=data,proto3" json:"data,omitempty"`
+	RefreshToken  string                 `protobuf:"bytes,3,opt,name=refreshToken,proto3" json:"refreshToken,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -479,6 +480,13 @@ func (x *LoginResp) GetData() *UserInfo {
 		return x.Data
 	}
 	return nil
+}
+
+func (x *LoginResp) GetRefreshToken() string {
+	if x != nil {
+		return x.RefreshToken
+	}
+	return ""
 }
 
 // 刷新 token
@@ -593,7 +601,7 @@ type ListUsersReq struct {
 	PageSize int32                  `protobuf:"varint,2,opt,name=pageSize,proto3" json:"pageSize,omitempty"`
 	Phone    string                 `protobuf:"bytes,3,opt,name=phone,proto3" json:"phone,omitempty"`
 	Name     string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
-	// 排序字段（白名单校验：id, createTime, updateTime），默认 "id"
+	// 排序字段（白名单：id, createTime, updateTime），默认 "id"
 	SortBy string `protobuf:"bytes,5,opt,name=sortBy,proto3" json:"sortBy,omitempty"`
 	// 排序方向："asc" 或 "desc"，默认 "desc"
 	SortOrder     string `protobuf:"bytes,6,opt,name=sortOrder,proto3" json:"sortOrder,omitempty"`
@@ -1162,10 +1170,11 @@ const file_user_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\"<\n" +
 	"\bLoginReq\x12\x14\n" +
 	"\x05phone\x18\x01 \x01(\tR\x05phone\x12\x1a\n" +
-	"\bpassword\x18\x02 \x01(\tR\bpassword\"L\n" +
+	"\bpassword\x18\x02 \x01(\tR\bpassword\"p\n" +
 	"\tLoginResp\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\x12)\n" +
-	"\x04data\x18\x02 \x01(\v2\x15.api.user.v1.UserInfoR\x04data\"5\n" +
+	"\x04data\x18\x02 \x01(\v2\x15.api.user.v1.UserInfoR\x04data\x12\"\n" +
+	"\frefreshToken\x18\x03 \x01(\tR\frefreshToken\"5\n" +
 	"\x0fRefreshTokenReq\x12\"\n" +
 	"\frefreshToken\x18\x01 \x01(\tR\frefreshToken\"w\n" +
 	"\x10RefreshTokenResp\x12\x14\n" +

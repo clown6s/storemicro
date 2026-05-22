@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -103,9 +104,15 @@ type JwtConfig struct {
 
 // RedisConfig Redis 配置
 type RedisConfig struct {
-	Addr     string `yaml:"addr"`
-	Password string `yaml:"password" json:"-"`
-	Db       int    `yaml:"db"`
+	Addr         string        `yaml:"addr"`
+	Password     string        `yaml:"password" json:"-"`
+	Db           int           `yaml:"db"`
+	PoolSize     int           `yaml:"poolSize"`     // 连接池大小，默认 20
+	MinIdleConns int           `yaml:"minIdleConns"` // 最小空闲连接数，默认 5
+	DialTimeout  time.Duration `yaml:"dialTimeout"`  // 连接超时，默认 3s
+	ReadTimeout  time.Duration `yaml:"readTimeout"`  // 读超时，默认 5s
+	WriteTimeout time.Duration `yaml:"writeTimeout"` // 写超时，默认 5s
+	MaxRetries   int           `yaml:"maxRetries"`   // 最大重试次数，默认 3
 }
 
 // DefaultAppConfig 返回默认配置
@@ -146,7 +153,13 @@ func DefaultAppConfig() *AppConfig {
 			DialTimeout: 5 * time.Second,
 		},
 		Redis: RedisConfig{
-			Db: 0,
+			Db:           0,
+			PoolSize:     20,
+			MinIdleConns: 5,
+			DialTimeout:  3 * time.Second,
+			ReadTimeout:  5 * time.Second,
+			WriteTimeout: 5 * time.Second,
+			MaxRetries:   3,
 		},
 		Log: LogConfig{
 			Level: "info",
@@ -204,6 +217,25 @@ func Load(path string) (*AppConfig, error) {
 	// 校验 Redis Db 范围 (0-15)
 	if cfg.Redis.Db < 0 || cfg.Redis.Db > 15 {
 		return nil, fmt.Errorf("redis.db must be between 0 and 15, got %d", cfg.Redis.Db)
+	}
+	// Redis 连接池参数兜底（代码已有默认值，显式兜底防止零值覆盖）
+	if cfg.Redis.PoolSize <= 0 {
+		cfg.Redis.PoolSize = 20
+	}
+	if cfg.Redis.MinIdleConns <= 0 {
+		cfg.Redis.MinIdleConns = 5
+	}
+	if cfg.Redis.DialTimeout <= 0 {
+		cfg.Redis.DialTimeout = 3 * time.Second
+	}
+	if cfg.Redis.ReadTimeout <= 0 {
+		cfg.Redis.ReadTimeout = 5 * time.Second
+	}
+	if cfg.Redis.WriteTimeout <= 0 {
+		cfg.Redis.WriteTimeout = 5 * time.Second
+	}
+	if cfg.Redis.MaxRetries <= 0 {
+		cfg.Redis.MaxRetries = 3
 	}
 	if cfg.Log.Level == "" {
 		cfg.Log.Level = "info"
@@ -299,8 +331,9 @@ func validateGrpcClient(c *GrpcClientConfig) error {
 }
 
 // grpcDuration 将 time.Duration 转为 gRPC service config 要求的秒级格式（如 "0.1s"、"1s"）
+// 使用 %f 格式避免 %.9g 在大值时切换到科学计数法（如 1e+06s）
 func grpcDuration(d time.Duration) string {
-	return fmt.Sprintf("%.9gs", d.Seconds())
+	return strconv.FormatFloat(d.Seconds(), 'f', 9, 64) + "s"
 }
 
 // BuildServiceConfig 将 GrpcClientConfig 转为 gRPC WithDefaultServiceConfig 所需的 JSON 字符串

@@ -13,6 +13,9 @@ type Claims struct {
 	jwt.RegisteredClaims
 }
 
+// RefreshExpireHours refresh token 有效期（7 天 = 168 小时）
+const RefreshExpireHours = 168
+
 // JWT 工具
 type JWT struct {
 	secret    []byte
@@ -57,7 +60,33 @@ func (j *JWT) GenerateToken(userID int64) (string, error) {
 	return token.SignedString(j.secret)
 }
 
-// ExpireHours 返回 token 过期时长（用于 Redis key TTL）
+// ParseRefreshToken 解析并校验 refresh token（签名 + audience + 过期时间）
+func (j *JWT) ParseRefreshToken(tokenStr string) (*Claims, error) {
+	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, jwt.ErrSignatureInvalid
+		}
+		return j.secret, nil
+	}, jwt.WithAudience("storemicro-refresh"), jwt.WithIssuer(j.issuer))
+	if err != nil || !token.Valid {
+		return nil, fmt.Errorf("invalid refresh token: %w", err)
+	}
+
+	c, ok := token.Claims.(*Claims)
+	if !ok {
+		return nil, fmt.Errorf("invalid refresh token claims")
+	}
+
+	// 防御性过期校验：jwt.ParseWithClaims 已内置过期检查，此处作为额外防线
+	// 处理极端情况：token 恰好在 ParseWithClaims 和此处检查之间过期
+	if c.ExpiresAt == nil || c.ExpiresAt.Before(time.Now()) {
+		return nil, fmt.Errorf("refresh token expired")
+	}
+
+	return c, nil
+}
+
+// ExpireHours 返回 access token 过期时长（用于 Redis key TTL）
 func (j *JWT) ExpireHours() time.Duration {
 	return time.Duration(j.expireHrs) * time.Hour
 }
@@ -71,7 +100,7 @@ func (j *JWT) GenerateRefreshToken(userID int64) (string, error) {
 			Issuer:    j.issuer,
 			Subject:   fmt.Sprintf("%d", userID),
 			Audience:  jwt.ClaimStrings{"storemicro-refresh"},
-			ExpiresAt: jwt.NewNumericDate(now.Add(168 * time.Hour)), // 7 天
+			ExpiresAt: jwt.NewNumericDate(now.Add(time.Duration(RefreshExpireHours) * time.Hour)), // 7 天
 			IssuedAt:  jwt.NewNumericDate(now),
 			NotBefore: jwt.NewNumericDate(now),
 		},

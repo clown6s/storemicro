@@ -46,7 +46,9 @@ message Logger {
 message Registry {
   message Etcd {
     repeated string endpoints = 1;
-    int64 timeout = 2;
+    int64     timeout    = 2;
+    string    username   = 3;  // etcd 认证用户名（可选）
+    string    password   = 4;  // etcd 认证密码（可选）
   }
   Etcd etcd = 1;
 }

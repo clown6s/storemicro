@@ -20,9 +20,7 @@ message GetProvinceTreeReq {
 }
 
 message GetProvinceTreeResp {
-  uint32 code = 1;
-  string message = 2;
-  repeated DistrictTree data = 3;
+  repeated DistrictTree data = 1;
 }
 
 message DistrictTree {

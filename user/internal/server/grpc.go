@@ -14,11 +14,9 @@ import (
 	"user/internal/conf"
 	"user/internal/service"
 
-	validate "github.com/go-kratos/kratos/contrib/middleware/validate/v2"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware"
 	"github.com/go-kratos/kratos/v2/middleware/logging"
-	"github.com/go-kratos/kratos/v2/middleware/recovery"
 	"github.com/go-kratos/kratos/v2/middleware/tracing"
 	"github.com/go-kratos/kratos/v2/transport"
 	kratosgrpc "github.com/go-kratos/kratos/v2/transport/grpc"
@@ -48,6 +46,16 @@ type perIPRateLimiter struct {
 	stopCh      chan struct{} // 通知 cleanupLoop 退出
 }
 
+// rateLimiter 全局引用，供 CloseRateLimiter 调用
+var rateLimiter *perIPRateLimiter
+
+// CloseRateLimiter 停止 rate limiter 的后台 cleanup goroutine（#21: 防止 goroutine 泄漏）
+func CloseRateLimiter() {
+	if rateLimiter != nil {
+		rateLimiter.Close()
+	}
+}
+
 // ipEntry 封装限流器和最后使用时间，用于定期清理
 type ipEntry struct {
 	limiter  *rate.Limiter
@@ -62,9 +70,16 @@ func newPerIPRateLimiter(rps int, burst int, cleanupInterval time.Duration) *per
 		lastCleanup: time.Now(),
 		stopCh:      make(chan struct{}),
 	}
+	// #21: 保存全局引用供 shutdown 时关闭
+	rateLimiter = rl
 	// 启动后台 goroutine 定期清理过期 IP 条目，防止 map 无限增长导致 OOM
 	go rl.cleanupLoop(cleanupInterval * 2) // 清理周期 = 窗口 × 2，确保不误删活跃 IP
 	return rl
+}
+
+// Close 停止 cleanupLoop goroutine（#21 fix）
+func (rl *perIPRateLimiter) Close() {
+	close(rl.stopCh)
 }
 
 // cleanupLoop 定期清理超过 cleanupInterval 未访问的 IP 条目
@@ -139,6 +154,24 @@ func rateLimitMiddleware(limiter *perIPRateLimiter) middleware.Middleware {
 	}
 }
 
+// customRecovery 自定义 panic recovery 中间件（记录完整堆栈，替代 Kratos 内置 recovery）
+func customRecovery(logger log.Logger) middleware.Middleware {
+	return func(handler middleware.Handler) middleware.Handler {
+		return func(ctx context.Context, req interface{}) (reply interface{}, err error) {
+			defer func() {
+				if r := recover(); r != nil {
+					zap.L().Error("gRPC panic recovered",
+						zap.Any("panic", r),
+						zap.Stack("stack"),
+					)
+					err = status.Errorf(codes.Internal, "internal error")
+				}
+			}()
+			return handler(ctx, req)
+		}
+	}
+}
+
 // NewGRPCServer 创建 gRPC 服务器（鉴权由网关统一完成，内部服务无需重复校验）
 func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.UserService) *kratosgrpc.Server {
 	// #31: Wire 要求构造函数返回单值（非 error），无法优雅处理配置错误。
@@ -168,11 +201,10 @@ func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.UserService) 
 			PermitWithoutStream: true,
 		})),
 		kratosgrpc.Middleware(
-			recovery.Recovery(),
+			customRecovery(logger),
+			rateLimitMiddleware(newPerIPRateLimiter(10, 30, time.Minute)), // #34: Login/Register 10次/秒突发30
 			tracing.Server(),
 			logging.Server(logger),
-			validate.ProtoValidate(),
-			rateLimitMiddleware(newPerIPRateLimiter(10, 30, time.Minute)), // #34: Login/Register 10次/秒突发30
 		),
 	}
 	srv := kratosgrpc.NewServer(opts...)

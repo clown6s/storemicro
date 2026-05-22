@@ -45,5 +45,6 @@ func (u *DistrictUseCase) Get(ctx context.Context, adCode string) ([]*District, 
 	if adCode != "" && !adCodeRegex.MatchString(adCode) {
 		return nil, ErrInvalidAdCode
 	}
+	// NOTE: 数据层在 adCode 为空时添加了 LIMIT 50000，防止全量查询结果集过大
 	return u.repo.Get(ctx, adCode)
 }

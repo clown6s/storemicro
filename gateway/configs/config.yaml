@@ -11,7 +11,7 @@ version: v1
 
 # 服务器配置
 server:
-  addr: :8080
+  addr: :7000
   # HTTP 超时配置
   readTimeout: 30s
   writeTimeout: 60s
@@ -49,6 +49,12 @@ redis:
   addr: "${REDIS_HOST:10.211.55.5}:${REDIS_PORT:6379}"
   password: "${REDIS_PASSWORD:admin@zzp}"
   db: 0
+  # poolSize: 20        # 连接池大小（默认 20）
+  # minIdleConns: 5     # 最小空闲连接数（默认 5）
+  # dialTimeout: 3s     # 连接超时（默认 3s）
+  # readTimeout: 5s     # 读超时（默认 5s）
+  # writeTimeout: 5s    # 写超时（默认 5s）
+  # maxRetries: 3       # 最大重试次数（默认 3）
 
 # 链路追踪
 tracing:

@@ -49,7 +49,11 @@ func NewData(c *conf.Data) (*Data, func(), error) {
 		pool.ConnMaxIdleTime = int(c.Database.ConnMaxIdleTime)
 	}
 
-	db, err := pkgdb.Connect("mysql", c.Database.Source, pool)
+	driver := c.Database.Driver
+	if driver == "" {
+		driver = "mysql"
+	}
+	db, err := pkgdb.Connect(driver, c.Database.Source, pool)
 	if err != nil {
 		return nil, nil, err
 	}

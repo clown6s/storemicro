@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -21,6 +22,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	_ "google.golang.org/grpc/health"
 	"google.golang.org/grpc/keepalive"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -58,17 +60,17 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 		requestTimeout: cfg.GrpcClient.RequestTimeout,
 	}
 
-	// 创建 Redis 客户端（连接池配置）
+	// 创建 Redis 客户端（连接池配置从配置读取）
 	rdb := redis.NewClient(&redis.Options{
 		Addr:         cfg.Redis.Addr,
 		Password:     cfg.Redis.Password,
 		DB:           cfg.Redis.Db,
-		PoolSize:     20,
-		MinIdleConns: 5,
-		DialTimeout:  3 * time.Second,
-		ReadTimeout:  5 * time.Second,
-		WriteTimeout: 5 * time.Second,
-		MaxRetries:   3,
+		PoolSize:     cfg.Redis.PoolSize,
+		MinIdleConns: cfg.Redis.MinIdleConns,
+		DialTimeout:  cfg.Redis.DialTimeout,
+		ReadTimeout:  cfg.Redis.ReadTimeout,
+		WriteTimeout: cfg.Redis.WriteTimeout,
+		MaxRetries:   cfg.Redis.MaxRetries,
 	})
 
 	// 验证 Redis 连接（带重试，30s 整体超时）
@@ -164,6 +166,18 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 		}),
 		runtime.WithErrorHandler(customErrorHandler),
 		runtime.WithRoutingErrorHandler(customRoutingErrorHandler),
+		runtime.WithMetadata(func(ctx context.Context, r *http.Request) metadata.MD {
+			md := metadata.MD{}
+			// 注入 JWT 认证后的 user_id（供下游服务做资源归属校验）
+			if userID, ok := ctx.Value(auth.ContextKeyUserID).(int64); ok {
+				md.Set("x-user-id", strconv.FormatInt(userID, 10))
+			}
+			// 注入 X-Request-Id（跨服务链路追踪）
+			if reqID := r.Header.Get("X-Request-Id"); reqID != "" {
+				md.Set("x-request-id", reqID)
+			}
+			return md
+		}),
 	)
 
 	// RegisterHandler 使用带超时的 context，防止启动时卡死
@@ -218,14 +232,24 @@ func (p *Proxy) Conns() []*grpc.ClientConn {
 	return p.conns
 }
 
-// Close 关闭所有连接（#14: sync.Once 保证仅执行一次）
+// Close 关闭所有连接（#14: sync.Once 保证仅执行一次，#22: 10s 超时防阻塞）
 func (p *Proxy) Close() {
 	p.closeOnce.Do(func() {
 		pkglog.L().Info("gateway proxy closing connections...")
 		for _, conn := range p.conns {
 			if conn != nil {
-				if err := conn.Close(); err != nil {
-					pkglog.L().Warn("failed to close gRPC connection", zap.Error(err))
+				// #22: 每个 gRPC 连接关闭加 10s 超时，防止后端挂起时无限阻塞
+				closeDone := make(chan error, 1)
+				go func(c *grpc.ClientConn) {
+					closeDone <- c.Close()
+				}(conn)
+				select {
+				case err := <-closeDone:
+					if err != nil {
+						pkglog.L().Warn("failed to close gRPC connection", zap.Error(err))
+					}
+				case <-time.After(10 * time.Second):
+					pkglog.L().Warn("gRPC connection close timed out after 10s")
 				}
 			}
 		}

@@ -43,9 +43,7 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 		if req.AdCode == "" {
 			// 全量查询结果为空，返回 OK + 空数组
 			return &districtv1.GetProvinceTreeResp{
-				Code:    200,
-				Message: "success",
-				Data:    []*districtv1.DistrictTree{},
+				Data: []*districtv1.DistrictTree{},
 			}, nil
 		}
 		return nil, status.Error(codes.NotFound, "district not found")
@@ -54,9 +52,7 @@ func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.G
 	tree := buildDistrictTree(districts)
 
 	return &districtv1.GetProvinceTreeResp{
-		Code:    200,
-		Message: "success",
-		Data:    tree,
+		Data: tree,
 	}, nil
 }
 
@@ -79,17 +75,16 @@ func buildDistrictTree(districts []*biz.District) []*districtv1.DistrictTree {
 		}
 	}
 
+	// 2. O(n) 环检测：一次 DFS 标记所有在环上的节点（沿 parent 链向上遍历）
+	//    标记为 true 的节点说明其祖先链中存在环，不能作为子节点挂载
+	inCycle := detectCycles(nodeMap)
+
 	var roots []*districtv1.DistrictTree
 
-	// 2. 构建父子关系（带环检测）
+	// 3. 构建父子关系
 	for _, node := range nodeMap {
-		parent, ok := nodeMap[node.ParentAdCode]
-		if !ok || node.ParentAdCode == "100000" {
-			roots = append(roots, node)
-			continue
-		}
-		// 环检测：从 parent 沿链往上走，如果回到 node 本身则有环
-		if hasCycle(node.AdCode, parent, nodeMap) {
+		if inCycle[node.AdCode] {
+			// 环内节点提升为根
 			zap.L().Warn("buildDistrictTree: cycle detected, treating as root",
 				zap.String("adCode", node.AdCode),
 				zap.String("parentAdCode", node.ParentAdCode),
@@ -97,34 +92,74 @@ func buildDistrictTree(districts []*biz.District) []*districtv1.DistrictTree {
 			roots = append(roots, node)
 			continue
 		}
+		parent, ok := nodeMap[node.ParentAdCode]
+		if !ok || node.ParentAdCode == "100000" {
+			roots = append(roots, node)
+			continue
+		}
 		parent.Children = append(parent.Children, node)
 	}
 
-	// 3. 对各级 children 按 adCode 排序，保证输出稳定
+	// 4. 对各级 children 按 adCode 排序，保证输出稳定
 	sortTree(roots)
 
 	return roots
 }
 
-// hasCycle 从 start 沿 parent 链往上走，检查是否能到达 targetAdCode
-func hasCycle(targetAdCode string, start *districtv1.DistrictTree, nodeMap map[string]*districtv1.DistrictTree) bool {
-	visited := make(map[string]bool)
-	current := start
-	for current != nil {
-		if current.AdCode == targetAdCode {
-			return true
+// detectCycles O(n) 环检测：对每个节点沿 parent 链向上标记祖先路径。
+// 如果链中遇到另一个节点的"正在访问"标记，说明形成环，将整条链标记为 inCycle。
+func detectCycles(nodeMap map[string]*districtv1.DistrictTree) map[string]bool {
+	inCycle := make(map[string]bool, len(nodeMap))
+	const (
+		stateNone     = 0 // 未访问
+		stateVisiting = 1 // 正在沿 parent 链向上遍历（当前路径上）
+		stateDone     = 2 // 已完成遍历，确认无环
+	)
+	state := make(map[string]int8, len(nodeMap))
+
+	for _, node := range nodeMap {
+		if state[node.AdCode] != stateNone {
+			continue
 		}
-		if visited[current.AdCode] {
-			break // 已经走过的链不会再有新的环
+		// 沿 parent 链向上走，收集当前路径
+		var path []*districtv1.DistrictTree
+		cur := node
+		for cur != nil {
+			s := state[cur.AdCode]
+			if s == stateDone {
+				// 已确认无环，路径上所有节点都安全
+				break
+			}
+			if s == stateVisiting {
+				// 发现环！从 cur 到 path 末尾之间的节点都在环上
+				found := false
+				for _, p := range path {
+					if p.AdCode == cur.AdCode {
+						found = true
+					}
+					if found {
+						inCycle[p.AdCode] = true
+					}
+				}
+				inCycle[cur.AdCode] = true
+				break
+			}
+			// stateNone: 标记为正在访问，加入路径
+			state[cur.AdCode] = stateVisiting
+			path = append(path, cur)
+			parent, ok := nodeMap[cur.ParentAdCode]
+			if !ok || cur.ParentAdCode == "100000" {
+				break
+			}
+			cur = parent
 		}
-		visited[current.AdCode] = true
-		parent, ok := nodeMap[current.ParentAdCode]
-		if !ok || current.ParentAdCode == "100000" {
-			break
+		// 路径上所有节点标记为已完成
+		for _, p := range path {
+			state[p.AdCode] = stateDone
 		}
-		current = parent
 	}
-	return false
+
+	return inCycle
 }
 
 func sortTree(nodes []*districtv1.DistrictTree) {

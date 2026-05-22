@@ -114,10 +114,11 @@ SELECT DISTINCT
 FROM district_tree
 WHERE level IN ('province', 'city', 'district', 'street')
 ORDER BY adcode
+LIMIT 50000
 `
 		args = append(args, adCode)
 	} else {
-		// 返回全部行政区（不包含 country）
+		// 返回全部行政区（不包含 country），LIMIT 50000 防止结果集过大
 		query = `
 SELECT
     id,
@@ -129,6 +130,7 @@ SELECT
 FROM district
 WHERE level IN ('province', 'city', 'district', 'street')
 ORDER BY adcode
+LIMIT 50000
 `
 	}
 

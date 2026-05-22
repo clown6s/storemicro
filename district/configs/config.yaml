@@ -1,6 +1,6 @@
 server:
   grpc:
-    addr: :9003
+    addr: :6002
     timeout: 10s
 
 data:

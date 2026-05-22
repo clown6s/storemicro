@@ -116,8 +116,9 @@ message LoginReq {
 }
 
 message LoginResp {
-  string    token = 1;
-  UserInfo data   = 2;
+  string    token        = 1;
+  UserInfo data         = 2;
+  string    refreshToken = 3;
 }
 
 // 刷新 token
@@ -133,11 +134,11 @@ message RefreshTokenResp {
 
 // 用户列表（分页）
 message ListUsersReq {
-  int32  page     = 1;
-  int32  pageSize = 2;
-  string phone    = 3;
-  string name     = 4;
-  // 排序字段（白名单校验：id, createTime, updateTime），默认 "id"
+  int32  page      = 1;
+  int32  pageSize  = 2;
+  string phone     = 3;
+  string name      = 4;
+  // 排序字段（白名单：id, createTime, updateTime），默认 "id"
   string sortBy    = 5;
   // 排序方向："asc" 或 "desc"，默认 "desc"
   string sortOrder = 6;

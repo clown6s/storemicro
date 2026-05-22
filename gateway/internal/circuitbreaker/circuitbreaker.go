@@ -84,9 +84,9 @@ var (
 	initCBOnce sync.Once
 )
 
-// Init 初始化熔断器存储（应用启动时调用一次）
+// initStore 初始化熔断器存储（由 Interceptor 在首次调用时自动触发）
 // serviceNames 为已注册的服务名白名单，防止 map 无限增长
-func Init(cfg *Config, serviceNames []string) {
+func initStore(cfg *Config, serviceNames []string) {
 	initCBOnce.Do(func() {
 		// 复制配置，避免修改调用者的原始结构体
 		c := *cfg
@@ -163,7 +163,7 @@ func extractServiceName(method string) string {
 
 // UnaryInterceptor 返回按服务隔离的 gRPC 一元拦截器
 func UnaryInterceptor(cfg *Config, serviceNames []string) grpc.UnaryClientInterceptor {
-	Init(cfg, serviceNames)
+	initStore(cfg, serviceNames)
 
 	return func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
 		serviceName := extractServiceName(method)
@@ -177,7 +177,7 @@ func UnaryInterceptor(cfg *Config, serviceNames []string) grpc.UnaryClientInterc
 
 // StreamInterceptor 返回按服务隔离的 gRPC 流式拦截器
 func StreamInterceptor(cfg *Config, serviceNames []string) grpc.StreamClientInterceptor {
-	Init(cfg, serviceNames)
+	initStore(cfg, serviceNames)
 
 	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
 		serviceName := extractServiceName(method)

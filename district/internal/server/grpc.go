@@ -10,7 +10,6 @@ import (
 	"district/internal/conf"
 	"district/internal/service"
 
-	validate "github.com/go-kratos/kratos/contrib/middleware/validate/v2"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/middleware/logging"
 	"github.com/go-kratos/kratos/v2/middleware/recovery"
@@ -59,7 +58,6 @@ func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.DistrictServi
 			recovery.Recovery(),
 			tracing.Server(),
 			logging.Server(logger),
-			validate.ProtoValidate(),
 		),
 	}
 	srv := kratosgrpc.NewServer(opts...)

@@ -6,14 +6,14 @@ RUN apk add --no-cache git
 WORKDIR /app
 
 # Copy go.mod files first for dependency caching
-COPY go.mod go.sum ./
+COPY user/go.mod user/go.sum ./
 RUN go mod download
 
 # Copy shared packages
-COPY pkg/ /pkg/
+COPY pkg/ ./pkg/
 
 # Copy service source (configs only needed at runtime)
-COPY . .
+COPY user/ .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/user ./cmd/user
 
@@ -32,8 +32,7 @@ USER appuser
 
 EXPOSE 9001 9101
 
-HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -sf http://localhost:9101/healthz || exit 1
+# Health check is defined in docker-compose.yml
 
 ENTRYPOINT ["/app/user"]
 CMD ["-conf", "configs/config.yaml"]

@@ -2,23 +2,21 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
-	"runtime/debug"
-	"strings"
 	"time"
 
 	stdlog "log"
 	"user/internal/conf"
-	"user/internal/data"
 	"user/internal/pkg/snowflake"
+	"user/internal/server"
 
 	pkgcmd "github.com/storemicro/pkg/cmdutil"
 	envexpand "github.com/storemicro/pkg/envexpand"
+	pkghealth "github.com/storemicro/pkg/health"
 	pkgretry "github.com/storemicro/pkg/retry"
 	pkgtracing "github.com/storemicro/pkg/tracing"
 	pkglog "github.com/storemicro/pkg/zaplogger"
@@ -70,7 +68,7 @@ func main() {
 
 	var bc conf.Bootstrap
 	if err := c.Scan(&bc); err != nil {
-		fmt.Fprintf(os.Stderr, "failed to scan config: %v\n", err)
+		fmt.Fprintf(os.Stderr, "failed to scan config from %s: %v\n", confPath, err)
 		os.Exit(1)
 	}
 
@@ -194,16 +192,47 @@ func main() {
 	helper.Infow("msg", "service started", "name", Name)
 
 	// 健康检查 HTTP sidecar（默认 :9101，可通过 HEALTH_PORT 环境变量覆盖）
-	const defaultHealthPort = ":9101" // #30: 提取为常量
-	healthAddr := defaultHealthPort
-	if hp := os.Getenv("HEALTH_PORT"); hp != "" {
-		// #11: 校验端口格式，至少包含数字或冒号
-		if !strings.Contains(hp, ":") {
-			hp = ":" + hp // 兼容纯端口号格式（如 "9101"）
-		}
-		healthAddr = hp
+	healthAddr := pkghealth.ValidateHealthPort(os.Getenv("HEALTH_PORT"), ":9101")
+
+	var metricsHandler http.Handler
+	if metricsPassword := os.Getenv("METRICS_PASSWORD"); metricsPassword != "" {
+		metricsHandler = pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword)
+	} else {
+		helper.Warn("metrics: no METRICS_PASSWORD configured, /metrics endpoint is disabled")
 	}
-	healthSrv := startHealthServer(healthAddr, helper, result.AppData)
+
+	healthCfg := pkghealth.Config{
+		Port:        healthAddr,
+		ServiceName: Name,
+		ReadinessChecks: []pkghealth.ReadinessCheck{
+			func(ctx context.Context) error {
+				return result.AppData.DB().PingContext(ctx)
+			},
+			func(ctx context.Context) error {
+				rdb := result.AppData.Redis()
+				if rdb == nil {
+					return nil // Redis 未配置时不视为 unhealthy
+				}
+				return rdb.Ping(ctx)
+			},
+		},
+		MetricsHandler: metricsHandler,
+	}
+	healthSrv, err := pkghealth.StartHealthServer(healthCfg)
+	if err != nil {
+		helper.Errorf("start health server failed: %v", err)
+		os.Exit(1)
+	}
+
+	defer func() {
+		if healthSrv != nil {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := healthSrv.Shutdown(ctx); err != nil {
+				helper.Warnf("health server shutdown error: %v", err)
+			}
+		}
+	}()
 
 	// 启动服务（阻塞，内部监听信号并优雅退出）
 	if err := result.App.Run(); err != nil {
@@ -211,14 +240,8 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 优雅关闭健康检查服务器
-	if healthSrv != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := healthSrv.Shutdown(ctx); err != nil {
-			helper.Warnf("health server shutdown error: %v", err)
-		}
-	}
+	// 关闭 rate limiter 的 cleanup goroutine（防止 goroutine 泄漏）
+	server.CloseRateLimiter()
 }
 
 func newApp(logger log.Logger, gs *grpc.Server, reg registry.Registrar) *kratos.App {
@@ -230,106 +253,4 @@ func newApp(logger log.Logger, gs *grpc.Server, reg registry.Registrar) *kratos.
 		kratos.Server(gs),
 		kratos.Registrar(reg),
 	)
-}
-
-// startHealthServer 启动轻量级健康检查 HTTP 服务器（含 Prometheus metrics），返回 server 引用供优雅关闭
-func startHealthServer(addr string, helper *log.Helper, appData *data.Data) *http.Server {
-	mux := http.NewServeMux()
-	// liveness — 仅检查进程存活
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		b, err := json.Marshal(map[string]string{"status": "ok", "service": Name})
-		if err != nil {
-			helper.Errorf("healthz json marshal failed: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		_, _ = w.Write(b)
-	})
-	// readiness — 检查 MySQL 和 Redis 连通性
-	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		checks := map[string]string{}
-
-		ctx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
-		defer cancel()
-
-		// MySQL
-		if err := appData.DB().PingContext(ctx); err != nil {
-			helper.Warnf("readyz mysql ping failed: %v", err)
-			checks["mysql"] = "unhealthy"
-		} else {
-			checks["mysql"] = "ok"
-		}
-
-		// Redis
-		if appData.Redis() != nil {
-			if err := appData.Redis().Ping(ctx); err != nil {
-				helper.Warnf("readyz redis ping failed: %v", err)
-				checks["redis"] = "unhealthy"
-			} else {
-				checks["redis"] = "ok"
-			}
-		}
-
-		allOk := true
-		for _, v := range checks {
-			if v != "ok" {
-				allOk = false
-				break
-			}
-		}
-		status := "ok"
-		code := http.StatusOK
-		if !allOk {
-			status = "not ready"
-			code = http.StatusServiceUnavailable
-		}
-		b, err := json.Marshal(map[string]any{"status": status, "checks": checks})
-		if err != nil {
-			helper.Errorf("readyz json marshal failed: %v", err)
-			w.WriteHeader(http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(code)
-		_, _ = w.Write(b)
-	})
-	// Prometheus metrics 端点（必须配置 Bearer token 才启用）
-	if metricsPassword := os.Getenv("METRICS_PASSWORD"); metricsPassword != "" {
-		mux.Handle("/metrics", pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword))
-	} else {
-		helper.Warn("metrics: no METRICS_PASSWORD configured, /metrics endpoint is disabled")
-	}
-
-	// 为整个 health mux 包裹 panic recovery（与 gateway 保持一致）
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		defer func() {
-			if rec := recover(); rec != nil {
-				helper.Errorf("panic recovered in health server",
-					"error", rec,
-					"stack", string(debug.Stack()),
-				)
-				w.Header().Set("Content-Type", "application/json; charset=utf-8")
-				w.WriteHeader(http.StatusInternalServerError)
-				_, _ = w.Write([]byte(`{"code":500,"message":"internal server error"}`))
-			}
-		}()
-		mux.ServeHTTP(w, r)
-	})
-
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           handler,
-		ReadTimeout:       5 * time.Second,
-		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      5 * time.Second,
-		IdleTimeout:       30 * time.Second,
-	}
-	helper.Infow("msg", "health server starting", "addr", addr)
-	go func() {
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			helper.Errorf("health server error: %v", err)
-		}
-	}()
-	return srv
 }

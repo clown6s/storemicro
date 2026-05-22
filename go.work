@@ -6,6 +6,7 @@ use (
 	./pkg/cmdutil
 	./pkg/dbutil
 	./pkg/envexpand
+	./pkg/health
 	./pkg/retry
 	./pkg/strutil
 	./pkg/tracing

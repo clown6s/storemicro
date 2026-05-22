@@ -18,7 +18,7 @@ var globalLog atomic.Pointer[zap.Logger]
 
 // Config 日志配置
 type Config struct {
-	Level      string // debug, info, warn, error
+	Level      string // debug, info, warn, error（运行时不可动态调整，需重启生效）
 	Mode       string // dev (console) | prod (json)，默认 dev
 	Filepath   string // 日志文件路径，空 = 仅 stdout
 	MaxSize    int    // lumberjack: 单文件最大 MB，默认 100

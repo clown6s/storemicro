@@ -380,8 +380,8 @@ func retryRecover(etcdClient *clientv3.Client, key string) {
 // GenID 生成一个雪花 ID
 // 如果节点 lease 已丢失且未重新获取，直接返回错误，防止与其他实例产生 ID 碰撞
 func GenID() (int64, error) {
-	readyMu.RLock()
-	defer readyMu.RUnlock()
+	readyMu.Lock()
+	defer readyMu.Unlock()
 	if !nodeReady || node == nil {
 		return 0, fmt.Errorf("snowflake: node not ready, cannot generate ID (lease lost or not initialized)")
 	}

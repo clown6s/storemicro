@@ -40,7 +40,12 @@ func ExpandEnv(s string) string {
 		if val, ok := os.LookupEnv(varName); ok {
 			return val
 		}
-		return match // 环境变量不存在时保留原文
+		// 环境变量不存在时保留原文，但记录警告帮助排查配置错误
+		zap.L().Warn("envexpand: undefined variable, keeping literal value",
+			zap.String("variable", varName),
+			zap.String("literal", match),
+		)
+		return match
 	})
 }
 

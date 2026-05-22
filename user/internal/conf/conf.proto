@@ -23,19 +23,22 @@ message Tracing {
 
 message Server {
   message GRPC {
-    string                addr = 1;
-    google.protobuf.Duration timeout = 2;
+    string                addr      = 1;
+    google.protobuf.Duration timeout   = 2;
+    string                certFile  = 3;  // TLS 证书文件路径，为空则不启用 TLS
+    string                keyFile   = 4;  // TLS 私钥文件路径
   }
   GRPC grpc = 1;
 }
 
 message Data {
   message Database {
-    string  source          = 1;
-    int64   maxOpenConns    = 2;  // 最大打开连接数，默认 100
-    int64   maxIdleConns    = 3;  // 最大空闲连接数，默认 25
-    int64   connMaxLifetime = 4;  // 连接最大存活时间（秒），默认 3600
-    int64   connMaxIdleTime = 5;  // 空闲连接最大存活时间（秒），默认 conn_max_lifetime/2
+    string  driver          = 1;
+    string  source          = 2;
+    int64   maxOpenConns    = 3;
+    int64   maxIdleConns    = 4;
+    int64   connMaxLifetime = 5;
+    int64   connMaxIdleTime = 6;
   }
   Database database = 1;
 }
@@ -48,6 +51,8 @@ message Registry {
   message Etcd {
     repeated string endpoints = 1;
     int64     timeout    = 2;
+    string    username   = 3;  // etcd 认证用户名（可选）
+    string    password   = 4;  // etcd 认证密码（可选）
   }
   Etcd etcd = 1;
 }
@@ -69,4 +74,5 @@ message Redis {
   google.protobuf.Duration readTimeout   = 7;  // 读超时，默认 5s
   google.protobuf.Duration writeTimeout  = 8;  // 写超时，默认 5s
   int32  maxRetries  = 9;  // 最大重试次数，默认 3
+  int32  connMaxIdleTime = 10; // 空闲连接最大存活时间（秒），默认 300
 }

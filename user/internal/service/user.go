@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 
 	userv1 "user/api/user/v1"
@@ -85,15 +86,16 @@ func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.
 		zap.String("trace_id", traceID),
 	)
 
-	token, user, err := s.uc.Login(ctx, req.Phone, req.Password)
+	token, refreshToken, user, err := s.uc.Login(ctx, req.Phone, req.Password)
 	if err != nil {
 		zap.L().Warn("Login failed", zap.String("phone", pkgstr.MaskPhone(req.Phone)), zap.Error(err))
 		return nil, s.mapError(err)
 	}
 
 	return &userv1.LoginResp{
-		Token: token,
-		Data:  s.toUserInfo(user),
+		Token:        token,
+		RefreshToken: refreshToken,
+		Data:         s.toUserInfo(user),
 	}, nil
 }
 
@@ -152,7 +154,13 @@ func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv
 		return nil, status.Error(codes.Unauthenticated, "missing authorization token")
 	}
 
-	if err := s.uc.Logout(ctx, token); err != nil {
+	// 通过 token 获取 userID（从 Redis 查询）
+	userID, err := s.uc.GetUserIDByToken(ctx, token)
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
+	}
+
+	if err := s.uc.Logout(ctx, token, userID); err != nil {
 		zap.L().Warn("Logout failed", zap.Error(err))
 		return nil, s.mapError(err)
 	}
@@ -202,9 +210,32 @@ func extractTokenFromMetadata(ctx context.Context) string {
 	return strings.TrimSpace(authHeader[7:])
 }
 
+// getCallerUserID 从 gRPC metadata 中提取调用者 user_id（由 gateway 注入）
+func getCallerUserID(ctx context.Context) (int64, bool) {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return 0, false
+	}
+	values := md.Get("x-user-id")
+	if len(values) == 0 {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(values[0], 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return id, true
+}
+
 // UpdateUser 更新用户资料
 func (s *UserService) UpdateUser(ctx context.Context, req *userv1.UpdateUserReq) (*userv1.UpdateUserResp, error) {
 	zap.L().Debug("UpdateUser called", zap.Int64("id", req.Id))
+
+	// 水平越权校验：只能修改自己的资料
+	callerID, ok := getCallerUserID(ctx)
+	if !ok || callerID != req.Id {
+		return nil, status.Error(codes.PermissionDenied, "cannot modify other users")
+	}
 
 	user := &biz.User{
 		ID:       req.Id,
@@ -214,6 +245,9 @@ func (s *UserService) UpdateUser(ctx context.Context, req *userv1.UpdateUserReq)
 		Remark:   req.Remark,
 	}
 	// 1. 先处理 ForceClearFields（表示要清零的字段）
+	if len(req.ForceClearFields) > 10 {
+		return nil, status.Errorf(codes.InvalidArgument, "too many force clear fields, max 10")
+	}
 	if len(req.ForceClearFields) > 0 {
 		allowed := map[string]bool{"email": true, "remark": true, "avatar": true, "realName": true, "gender": true, "age": true}
 		user.UpdateFields = make(map[string]bool, len(req.ForceClearFields))
@@ -256,6 +290,12 @@ func (s *UserService) DeleteUser(ctx context.Context, req *userv1.DeleteUserReq)
 		return nil, status.Errorf(codes.InvalidArgument, "invalid user id: %d", req.Id)
 	}
 
+	// 水平越权校验：只能删除自己
+	callerID, ok := getCallerUserID(ctx)
+	if !ok || callerID != req.Id {
+		return nil, status.Error(codes.PermissionDenied, "cannot delete other users")
+	}
+
 	if err := s.uc.Delete(ctx, req.Id); err != nil {
 		zap.L().Warn("DeleteUser failed", zap.Int64("id", req.Id), zap.Error(err))
 		return nil, s.mapError(err)
@@ -270,7 +310,7 @@ func (s *UserService) DeleteUser(ctx context.Context, req *userv1.DeleteUserReq)
 func (s *UserService) toUserInfo(u *biz.User) *userv1.UserInfo {
 	return &userv1.UserInfo{
 		Id:         u.ID,
-		Email:      u.Email,
+		Email:      pkgstr.MaskEmail(u.Email),
 		Phone:      pkgstr.MaskPhone(u.Phone),
 		RealName:   u.RealName,
 		Avatar:     u.Avatar,
@@ -291,11 +331,14 @@ func (s *UserService) mapError(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, biz.ErrPhoneExists), errors.Is(err, biz.ErrEmailExists):
 		return status.Error(codes.AlreadyExists, "user already exists")
+	case errors.Is(err, biz.ErrWrongCredentials), errors.Is(err, biz.ErrInvalidRefreshToken):
+		return status.Error(codes.Unauthenticated, err.Error())
+	case errors.Is(err, biz.ErrGenerateToken), errors.Is(err, biz.ErrStoreToken):
+		return status.Error(codes.Internal, "internal error")
 	case errors.Is(err, biz.ErrInvalidUserID),
 		errors.Is(err, biz.ErrPhoneRequired),
 		errors.Is(err, biz.ErrPasswordRequired),
 		errors.Is(err, biz.ErrNothingToUpdate),
-		errors.Is(err, biz.ErrWrongCredentials),
 		errors.Is(err, biz.ErrTokenRequired),
 		errors.Is(err, biz.ErrInvalidPhone),
 		errors.Is(err, biz.ErrInvalidEmail),
@@ -313,8 +356,15 @@ func (s *UserService) mapError(err error) error {
 		errors.Is(err, biz.ErrPasswordNoSpecial),
 		errors.Is(err, biz.ErrInvalidGender),
 		errors.Is(err, biz.ErrInvalidAge),
-		errors.Is(err, biz.ErrWrongOldPassword):
+		errors.Is(err, biz.ErrWrongOldPassword),
+		errors.Is(err, biz.ErrPasswordSameAsOld):
 		return status.Error(codes.InvalidArgument, err.Error())
+	case errors.Is(err, biz.ErrEncryptPassword):
+		return status.Error(codes.Internal, "internal error")
+	case errors.Is(err, biz.ErrTokenInvalidationFailed):
+		return status.Error(codes.Internal, "password changed but token invalidation incomplete, please re-login")
+	case errors.Is(err, biz.ErrRegisterRateLimited):
+		return status.Error(codes.ResourceExhausted, err.Error())
 	default:
 		zap.L().Error("unexpected user error", zap.Error(err))
 		return status.Error(codes.Internal, "internal error")

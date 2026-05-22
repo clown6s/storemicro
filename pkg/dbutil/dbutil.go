@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	pkgretry "github.com/storemicro/pkg/retry"
@@ -35,6 +36,18 @@ var allowedDrivers = map[string]bool{"mysql": true}
 func Connect(driver, dsn string, pool DefaultPoolConfig) (*sql.DB, error) {
 	if !allowedDrivers[driver] {
 		return nil, fmt.Errorf("unsupported database driver: %s", driver)
+	}
+	// 基本 DSN 格式校验（防止空 DSN 或明显格式错误）
+	if driver == "mysql" {
+		if dsn == "" {
+			return nil, fmt.Errorf("mysql DSN must not be empty")
+		}
+		if !strings.Contains(dsn, "@") {
+			return nil, fmt.Errorf("mysql DSN format error: missing '@' separator (expected: user:password@tcp(host:port)/dbname)")
+		}
+		if !strings.Contains(dsn, "/") {
+			return nil, fmt.Errorf("mysql DSN format error: missing '/' before dbname")
+		}
 	}
 	db, err := sql.Open(driver, dsn)
 	if err != nil {
@@ -84,6 +97,25 @@ func Connect(driver, dsn string, pool DefaultPoolConfig) (*sql.DB, error) {
 		zap.Int("max_open_conns", pool.MaxOpenConns),
 		zap.Int("max_idle_conns", pool.MaxIdleConns),
 	)
+
+	// 定期输出连接池统计信息到日志
+	go func() {
+		ticker := time.NewTicker(5 * time.Minute)
+		defer ticker.Stop()
+		for range ticker.C {
+			stats := db.Stats()
+			zap.L().Info("database pool stats",
+				zap.Int("open_connections", stats.OpenConnections),
+				zap.Int("in_use", stats.InUse),
+				zap.Int("idle", stats.Idle),
+				zap.Int64("wait_count", stats.WaitCount),
+				zap.Duration("wait_duration", stats.WaitDuration),
+				zap.Int64("max_idle_closed", stats.MaxIdleClosed),
+				zap.Int64("max_idle_time_closed", stats.MaxIdleTimeClosed),
+				zap.Int64("max_lifetime_closed", stats.MaxLifetimeClosed),
+			)
+		}
+	}()
 
 	return db, nil
 }

@@ -70,9 +70,7 @@ func (x *GetProvinceTreeReq) GetAdCode() string {
 
 type GetProvinceTreeResp struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Code          uint32                 `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	Data          []*DistrictTree        `protobuf:"bytes,3,rep,name=data,proto3" json:"data,omitempty"`
+	Data          []*DistrictTree        `protobuf:"bytes,1,rep,name=data,proto3" json:"data,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -105,20 +103,6 @@ func (x *GetProvinceTreeResp) ProtoReflect() protoreflect.Message {
 // Deprecated: Use GetProvinceTreeResp.ProtoReflect.Descriptor instead.
 func (*GetProvinceTreeResp) Descriptor() ([]byte, []int) {
 	return file_district_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *GetProvinceTreeResp) GetCode() uint32 {
-	if x != nil {
-		return x.Code
-	}
-	return 0
-}
-
-func (x *GetProvinceTreeResp) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
 }
 
 func (x *GetProvinceTreeResp) GetData() []*DistrictTree {
@@ -226,11 +210,9 @@ const file_district_proto_rawDesc = "" +
 	"\n" +
 	"\x0edistrict.proto\x12\x0fapi.district.v1\x1a\x1cgoogle/api/annotations.proto\",\n" +
 	"\x12GetProvinceTreeReq\x12\x16\n" +
-	"\x06adCode\x18\x01 \x01(\tR\x06adCode\"v\n" +
-	"\x13GetProvinceTreeResp\x12\x12\n" +
-	"\x04code\x18\x01 \x01(\rR\x04code\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\x121\n" +
-	"\x04data\x18\x03 \x03(\v2\x1d.api.district.v1.DistrictTreeR\x04data\"\xd7\x01\n" +
+	"\x06adCode\x18\x01 \x01(\tR\x06adCode\"H\n" +
+	"\x13GetProvinceTreeResp\x121\n" +
+	"\x04data\x18\x01 \x03(\v2\x1d.api.district.v1.DistrictTreeR\x04data\"\xd7\x01\n" +
 	"\fDistrictTree\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\"\n" +
 	"\fparentAdCode\x18\x02 \x01(\tR\fparentAdCode\x12\x16\n" +

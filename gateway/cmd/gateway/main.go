@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 
 	"gateway/internal/appconfig"
+	"gateway/internal/auth"
 	gwproxy "gateway/internal/proxy"
 
 	districtv1 "gateway/api/district/v1"
@@ -214,7 +215,7 @@ func newRootMux(proxy *gwproxy.Proxy, metricsPassword string) http.Handler {
 		_, _ = w.Write(b)
 	})
 
-	// Prometheus metrics 端点
+	// Prometheus metrics 端点（必须配置密码才能启用）
 	if metricsPassword == "" {
 		pkglog.L().Warn("metrics: no password configured, metrics endpoint is disabled")
 		mux.Handle("/metrics", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -229,8 +230,8 @@ func newRootMux(proxy *gwproxy.Proxy, metricsPassword string) http.Handler {
 	// 其余所有请求走 gateway proxy（proxy 内部已有 panic recovery）
 	mux.Handle("/", proxy)
 
-	// LOW: 为根 mux 整体包裹 panic recovery，覆盖 healthz/readyz/metrics
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// 为根 mux 整体包裹 panic recovery，覆盖 healthz/readyz/metrics
+	return auth.RequestIDMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
 				pkglog.L().Error("panic recovered in root mux",
@@ -243,7 +244,7 @@ func newRootMux(proxy *gwproxy.Proxy, metricsPassword string) http.Handler {
 			}
 		}()
 		mux.ServeHTTP(w, r)
-	})
+	}))
 }
 
 // limitRequestBody 限制请求体大小，防止 OOM 攻击

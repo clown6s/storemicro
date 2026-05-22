@@ -46,5 +46,10 @@ func newJWT(c *conf.Jwt) *jwt.JWT {
 }
 
 func newRedis(c *conf.Redis) (*redis.Redis, error) {
-	return redis.NewRedis(c.Addr, c.Password, int(c.Db))
+	return redis.NewRedis(
+		c.Addr, c.Password, int(c.Db),
+		c.PoolSize, c.MinIdleConns,
+		c.GetDialTimeout().AsDuration(), c.GetReadTimeout().AsDuration(), c.GetWriteTimeout().AsDuration(),
+		c.MaxRetries, "",
+	)
 }
