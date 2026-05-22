@@ -5,32 +5,44 @@ RUN apk add --no-cache git
 
 WORKDIR /app
 
-# Copy go.mod first for dependency caching
+# Copy go.mod files for dependency caching
 COPY gateway/go.mod gateway/go.sum ./
+COPY pkg/ ./pkg/
+
+# Generate go.work for Docker build (host go.work is excluded by .dockerignore)
+RUN printf 'go 1.26.1\nuse (\n  .\n  ./pkg/cmdutil\n  ./pkg/envexpand\n  ./pkg/retry\n  ./pkg/tracing\n  ./pkg/zaplogger\n)\n' > go.work
+
 RUN go mod download
 
-# Copy shared packages and service source
-COPY pkg/ ./pkg/
+# Copy service source
 COPY gateway/ .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -o /bin/gateway ./cmd/gateway
+# Production build: strip debug info + remove file paths
+RUN CGO_ENABLED=0 GOOS=linux \
+    go build -trimpath \
+    -ldflags "-s -w -buildid=" \
+    -o /bin/gateway ./cmd/gateway
 
-# Runtime stage
+# Runtime stage — minimal attack surface
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata curl
-RUN adduser -D -u 1000 appuser
+RUN apk add --no-cache ca-certificates tzdata && \
+    adduser -D -u 1000 appuser && \
+    mkdir -p /app/configs && \
+    chown appuser:appuser /app/configs
+
 ENV TZ=Asia/Shanghai
 
 WORKDIR /app
 COPY --from=builder /bin/gateway .
-COPY --from=builder configs/ ./configs/
+COPY --from=builder /app/configs/ ./configs/
 
 USER appuser
 
-EXPOSE 8080
+EXPOSE 7000
 
-# Health check is defined in docker-compose.yml
+HEALTHCHECK --interval=10s --timeout=5s --retries=3 --start-period=30s \
+    CMD ["wget", "-qO-", "http://localhost:7000/readyz"]
 
 ENTRYPOINT ["/app/gateway"]
 CMD ["-conf", "configs/config.yaml"]

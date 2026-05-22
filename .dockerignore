@@ -1,7 +1,44 @@
+# Version control
 .git/
+.gitignore
+
+# Go workspace (各模块独立 go.mod)
 go.work
 go.work.sum
-.env
-*.md
+
+# IDE
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Docs (不需要进入 build context)
+*.md
+LICENSE
+
+# Third-party proto (编译时不需要)
+third_party/
+
+# Test & build artifacts
+*.test
+*_test.go
+*.out
+*.exe
+*.prof
+*.pprof
+coverage.html
+
+# Docker files (不需要递归)
+docker-compose.yml
+docker-compose*.yml
+
+# Misc
+.DS_Store
+Thumbs.db
+*.log

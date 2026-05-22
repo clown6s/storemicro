@@ -44,12 +44,6 @@ services:
       TZ: *timezone
       MYSQL_ROOT_PASSWORD: *password
       MYSQL_DATABASE: store_micro
-      # 安全：禁止空密码、禁止远程root登录
-      MYSQL_ALLOW_EMPTY_PASSWORD: "no"
-      MYSQL_ROOT_HOST: "localhost"
-      # 字符集：默认 utf8mb4，emoji兼容
-      MYSQL_CHARSET: utf8mb4
-      MYSQL_COLLATION: utf8mb4_unicode_ci
     command: >
       --character-set-server=utf8mb4
       --collation-server=utf8mb4_unicode_ci
@@ -96,9 +90,11 @@ services:
     container_name: storemicro-redis
     environment:
       TZ: *timezone
+      REDIS_PASSWORD: *password
+      REDISCLI_AUTH: *password
     command: >
       redis-server
-      --requirepass ${REDIS_PASSWORD:-admin@zzp}
+      --requirepass ${REDIS_PASSWORD}
       --appendonly yes
       --appendfsync everysec
       --maxmemory 192mb
@@ -125,7 +121,7 @@ services:
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-admin@zzp}", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -187,8 +183,8 @@ services:
       dockerfile: user/Dockerfile
     container_name: storemicro-user
     ports:
-      - "6001:9101"
-      # gRPC :9001 仅容器内通信，不映射宿主机
+      - "6001:6001"
+      - "9101:9101"
     environment:
       TZ: *timezone
       DB_PASSWORD: *password
@@ -244,8 +240,8 @@ services:
       dockerfile: district/Dockerfile
     container_name: storemicro-district
     ports:
-      - "6002:9103"
-      # gRPC :9003 仅容器内通信，不映射宿主机
+      - "6002:6002"
+      - "9103:9103"
     environment:
       TZ: *timezone
       DB_PASSWORD: *password
@@ -295,7 +291,7 @@ services:
       dockerfile: gateway/Dockerfile
     container_name: storemicro-gateway
     ports:
-      - "7000:8080"
+      - "7000:7000"
     environment:
       TZ: *timezone
       JWT_SECRET: *jwt-secret
