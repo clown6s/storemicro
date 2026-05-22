@@ -120,11 +120,11 @@ services:
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$REDISCLI_AUTH\" ping | grep PONG"]
       interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 10s
+      retries: 5
+      start_period: 15s
     logging: *logging
     networks:
       - internal
