@@ -19,17 +19,30 @@ import (
 
 // Injectors from wire.go:
 
-func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, registrar registry.Registrar) (*kratos.App, *data.Data, func(), error) {
+func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, registrar registry.Registrar) (wireResult, func(), error) {
 	dataData, cleanup, err := data.NewData(confData)
 	if err != nil {
-		return nil, nil, nil, err
+		return wireResult{}, nil, err
 	}
 	districtRepo := data.NewDistrictRepo(dataData)
 	districtUseCase := biz.NewDistrictUseCase(districtRepo)
 	districtService := service.NewDistrictService(districtUseCase)
 	grpcServer := server.NewGRPCServer(confServer, logger, districtService)
 	app := newApp(logger, grpcServer, registrar)
-	return app, dataData, func() {
+	mainWireResult := newWireResult(app, dataData)
+	return mainWireResult, func() {
 		cleanup()
 	}, nil
+}
+
+// wire.go:
+
+// wireResult Wire 注入结果（Wire 不支持多返回值，用结构体打包）
+type wireResult struct {
+	App     *kratos.App
+	AppData *data.Data
+}
+
+func newWireResult(app *kratos.App, appData *data.Data) wireResult {
+	return wireResult{App: app, AppData: appData}
 }

@@ -27,7 +27,7 @@ server:
 # etcd 服务发现
 etcd:
   endpoints:
-    - "10.211.55.5:2379"
+    - "${ETCD_ENDPOINT:10.211.55.5:2379}"
   dialTimeout: 5s
 
 # 日志配置
@@ -42,12 +42,12 @@ logger:
 
 # JWT 配置（⚠️ 生产环境必须通过环境变量 JWT_SECRET 注入）
 jwt:
-  secret: '4*8#5@7!^i(nj_9876555=+s4x3v9g12m`js0lmb8(-=+-_!`~||\]}mb<.?,.>>,mncukdkieijufonicndknveufw3io'
+  secret: '${JWT_SECRET:4*8#5@7!^i(nj_9876555=+s4x3v9g12m`js0lmb8(-=+-_!`~||\]}mb<.?,.>>,mncukdkieijufonicndknveufw3io}'
 
 # Redis 配置（⚠️ 生产环境必须通过环境变量注入密码）
 redis:
-  addr: "10.211.55.5:6379"
-  password: "admin@zzp"
+  addr: "${REDIS_HOST:10.211.55.5}:${REDIS_PORT:6379}"
+  password: "${REDIS_PASSWORD:admin@zzp}"
   db: 0
 
 # 链路追踪

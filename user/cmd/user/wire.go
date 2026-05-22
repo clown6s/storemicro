@@ -12,12 +12,19 @@ import (
 	"user/internal/server"
 	"user/internal/service"
 
+	"github.com/go-kratos/kratos/v2"
 	"github.com/go-kratos/kratos/v2/log"
 	"github.com/go-kratos/kratos/v2/registry"
 	"github.com/google/wire"
 )
 
-func wireApp(*conf.Server, *conf.Data, *conf.Jwt, *conf.Redis, log.Logger, registry.Registrar) (*kratos.App, *data.Data, func(), error) {
+// wireResult Wire 注入结果（Wire 不支持多返回值，用结构体打包）
+type wireResult struct {
+	App     *kratos.App
+	AppData *data.Data
+}
+
+func wireApp(*conf.Server, *conf.Data, *conf.Jwt, *conf.Redis, log.Logger, registry.Registrar) (wireResult, func(), error) {
 	panic(wire.Build(
 		server.ProviderSet,
 		data.ProviderSet,
@@ -26,7 +33,12 @@ func wireApp(*conf.Server, *conf.Data, *conf.Jwt, *conf.Redis, log.Logger, regis
 		newJWT,
 		newRedis,
 		newApp,
+		newWireResult,
 	))
+}
+
+func newWireResult(app *kratos.App, appData *data.Data) wireResult {
+	return wireResult{App: app, AppData: appData}
 }
 
 func newJWT(c *conf.Jwt) *jwt.JWT {

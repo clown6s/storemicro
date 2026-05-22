@@ -14,10 +14,23 @@ import (
 	"github.com/go-sql-driver/mysql"
 	pkgstr "github.com/storemicro/pkg/strutil"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 type userRepo struct {
 	data *Data
+}
+
+// parseTimestamp 将 RFC3339 时间字符串转为 *timestamppb.Timestamp
+func parseTimestamp(s string) *timestamppb.Timestamp {
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return nil
+	}
+	return timestamppb.New(t)
 }
 
 // NewUserRepo 创建 UserRepo 实现
@@ -34,8 +47,13 @@ func (r *userRepo) Get(ctx context.Context, id int64) (*biz.User, error) {
 		 FROM user WHERE id = ? AND (deleted_at IS NULL OR deleted_at = '')`, id,
 	)
 	user := &biz.User{}
+	var createTimeStr, updateTimeStr string
 	err := row.Scan(&user.ID, &user.RealName, &user.Avatar, &user.Gender, &user.Age,
-		&user.Phone, &user.Email, &user.CreateTime, &user.UpdateTime, &user.Remark, &user.DeletedAt)
+		&user.Phone, &user.Email, &createTimeStr, &updateTimeStr, &user.Remark, &user.DeletedAt)
+	if err == nil {
+		user.CreateTime = parseTimestamp(createTimeStr)
+		user.UpdateTime = parseTimestamp(updateTimeStr)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			zap.L().Warn("userRepo.Get not found", zap.Int64("id", id))
@@ -56,8 +74,13 @@ func (r *userRepo) GetByPhone(ctx context.Context, phone string) (*biz.User, err
 		 FROM user WHERE phone = ? AND (deleted_at IS NULL OR deleted_at = '')`, phone,
 	)
 	user := &biz.User{}
+	var createTimeStr, updateTimeStr string
 	err := row.Scan(&user.ID, &user.Password, &user.RealName, &user.Avatar, &user.Gender, &user.Age,
-		&user.Phone, &user.Email, &user.CreateTime, &user.UpdateTime, &user.Remark, &user.DeletedAt)
+		&user.Phone, &user.Email, &createTimeStr, &updateTimeStr, &user.Remark, &user.DeletedAt)
+	if err == nil {
+		user.CreateTime = parseTimestamp(createTimeStr)
+		user.UpdateTime = parseTimestamp(updateTimeStr)
+	}
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			zap.L().Warn("userRepo.GetByPhone not found", zap.String("phone", pkgstr.MaskPhone(phone)))
@@ -166,12 +189,15 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, 
 	users := make([]*biz.User, 0)
 	for rows.Next() {
 		user := &biz.User{}
+		var createTimeStr, updateTimeStr string
 		if err := rows.Scan(&user.ID, &user.RealName, &user.Avatar, &user.Gender, &user.Age,
-			&user.Phone, &user.Email, &user.CreateTime, &user.UpdateTime, &user.Remark); err != nil {
+			&user.Phone, &user.Email, &createTimeStr, &updateTimeStr, &user.Remark); err != nil {
 			zap.L().Error("userRepo.List scan failed", zap.Error(err))
 			// [M8] 统一错误包装
 			return nil, 0, fmt.Errorf("scan user row failed: %w", err)
 		}
+		user.CreateTime = parseTimestamp(createTimeStr)
+		user.UpdateTime = parseTimestamp(updateTimeStr)
 		users = append(users, user)
 	}
 
@@ -207,7 +233,7 @@ func (r *userRepo) UpdateTx(ctx context.Context, user *biz.User) error {
 	if user.Email != "" {
 		var emailCount int
 		err = tx.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM user WHERE email = ? AND id != ? AND (deleted_at IS NULL OR deleted_at = '')`,
+			`SELECT COUNT(*) FROM user WHERE email = ? AND id != ? AND (deleted_at IS NULL OR deleted_at = '') FOR UPDATE`,
 			user.Email, user.ID,
 		).Scan(&emailCount)
 		if err != nil {
@@ -447,5 +473,24 @@ func (r *userRepo) RegisterTx(ctx context.Context, user *biz.User) error {
 
 	// 回填 ID
 	user.ID = id
+	return nil
+}
+
+func (r *userRepo) UpdatePassword(ctx context.Context, id int64, hashedPassword string) error {
+	result, err := r.data.db.ExecContext(ctx,
+		`UPDATE user SET password = ?, update_time = ? WHERE id = ? AND (deleted_at IS NULL OR deleted_at = '')`,
+		hashedPassword, time.Now().UTC().Format(time.RFC3339), id,
+	)
+	if err != nil {
+		zap.L().Error("userRepo.UpdatePassword failed", zap.Int64("id", id), zap.Error(err))
+		return fmt.Errorf("update password failed: %w", err)
+	}
+	affected, raErr := result.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("get rows affected failed: %w", raErr)
+	}
+	if affected == 0 {
+		return biz.ErrUserNotFound
+	}
 	return nil
 }

@@ -116,6 +116,7 @@ func main() {
 	}
 	zapLogger := pkglog.New(logCfg)
 	log.SetLogger(zapLogger)
+	defer pkglog.L().Sync()
 
 	// #28: 配置加载完成后恢复 stdlog 输出，避免全局抑制第三方包日志
 	stdlog.SetOutput(os.Stderr)
@@ -183,7 +184,7 @@ func main() {
 	defer snowflake.Shutdown()
 	helper.Infow("msg", "snowflake initialized", "node_id", snowflake.NodeID)
 
-	app, appData, cleanup, err := wireApp(bc.Server, bc.Data, bc.Jwt, bc.Redis, zapLogger, reg)
+	result, cleanup, err := wireApp(bc.Server, bc.Data, bc.Jwt, bc.Redis, zapLogger, reg)
 	if err != nil {
 		helper.Errorf("failed to wire app: %v", err)
 		os.Exit(1)
@@ -202,10 +203,10 @@ func main() {
 		}
 		healthAddr = hp
 	}
-	healthSrv := startHealthServer(healthAddr, helper, appData)
+	healthSrv := startHealthServer(healthAddr, helper, result.AppData)
 
 	// 启动服务（阻塞，内部监听信号并优雅退出）
-	if err := app.Run(); err != nil {
+	if err := result.App.Run(); err != nil {
 		helper.Errorf("failed to run app: %v", err)
 		os.Exit(1)
 	}

@@ -61,3 +61,21 @@ func (j *JWT) GenerateToken(userID int64) (string, error) {
 func (j *JWT) ExpireHours() time.Duration {
 	return time.Duration(j.expireHrs) * time.Hour
 }
+
+// GenerateRefreshToken 生成 refresh token（7 天有效期，仅包含 user_id）
+func (j *JWT) GenerateRefreshToken(userID int64) (string, error) {
+	now := time.Now()
+	claims := Claims{
+		UserID: userID,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    j.issuer,
+			Subject:   fmt.Sprintf("%d", userID),
+			Audience:  jwt.ClaimStrings{"storemicro-refresh"},
+			ExpiresAt: jwt.NewNumericDate(now.Add(168 * time.Hour)), // 7 天
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(j.secret)
+}

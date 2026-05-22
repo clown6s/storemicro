@@ -22,28 +22,35 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	User_GetUser_FullMethodName    = "/api.user.v1.User/GetUser"
-	User_Register_FullMethodName   = "/api.user.v1.User/Register"
-	User_Login_FullMethodName      = "/api.user.v1.User/Login"
-	User_ListUsers_FullMethodName  = "/api.user.v1.User/ListUsers"
-	User_Logout_FullMethodName     = "/api.user.v1.User/Logout"
-	User_UpdateUser_FullMethodName = "/api.user.v1.User/UpdateUser"
-	User_DeleteUser_FullMethodName = "/api.user.v1.User/DeleteUser"
+	User_GetUser_FullMethodName        = "/api.user.v1.User/GetUser"
+	User_Register_FullMethodName       = "/api.user.v1.User/Register"
+	User_Login_FullMethodName          = "/api.user.v1.User/Login"
+	User_RefreshToken_FullMethodName   = "/api.user.v1.User/RefreshToken"
+	User_ListUsers_FullMethodName      = "/api.user.v1.User/ListUsers"
+	User_Logout_FullMethodName         = "/api.user.v1.User/Logout"
+	User_ChangePassword_FullMethodName = "/api.user.v1.User/ChangePassword"
+	User_UpdateUser_FullMethodName     = "/api.user.v1.User/UpdateUser"
+	User_DeleteUser_FullMethodName     = "/api.user.v1.User/DeleteUser"
 )
 
 // UserClient is the client API for User service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type UserClient interface {
+	// 获取用户
 	GetUser(ctx context.Context, in *GetUserReq, opts ...grpc.CallOption) (*GetUserResp, error)
 	// 用户注册
 	Register(ctx context.Context, in *RegisterReq, opts ...grpc.CallOption) (*RegisterResp, error)
 	// 用户登录（手机号+密码）
 	Login(ctx context.Context, in *LoginReq, opts ...grpc.CallOption) (*LoginResp, error)
+	// 刷新 token
+	RefreshToken(ctx context.Context, in *RefreshTokenReq, opts ...grpc.CallOption) (*RefreshTokenResp, error)
 	// 用户列表（分页）
 	ListUsers(ctx context.Context, in *ListUsersReq, opts ...grpc.CallOption) (*ListUsersResp, error)
-	// 用户登出（token 从 Authorization header 获取，不再通过 body 传递）
+	// 用户登出（token 从 Authorization header 获取）
 	Logout(ctx context.Context, in *LogoutReq, opts ...grpc.CallOption) (*LogoutResp, error)
+	// 修改密码（需登录，从 Authorization header 获取 token）
+	ChangePassword(ctx context.Context, in *ChangePasswordReq, opts ...grpc.CallOption) (*ChangePasswordResp, error)
 	// 更新用户资料
 	UpdateUser(ctx context.Context, in *UpdateUserReq, opts ...grpc.CallOption) (*UpdateUserResp, error)
 	// 删除用户（软删除）
@@ -88,6 +95,16 @@ func (c *userClient) Login(ctx context.Context, in *LoginReq, opts ...grpc.CallO
 	return out, nil
 }
 
+func (c *userClient) RefreshToken(ctx context.Context, in *RefreshTokenReq, opts ...grpc.CallOption) (*RefreshTokenResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RefreshTokenResp)
+	err := c.cc.Invoke(ctx, User_RefreshToken_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *userClient) ListUsers(ctx context.Context, in *ListUsersReq, opts ...grpc.CallOption) (*ListUsersResp, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(ListUsersResp)
@@ -102,6 +119,16 @@ func (c *userClient) Logout(ctx context.Context, in *LogoutReq, opts ...grpc.Cal
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(LogoutResp)
 	err := c.cc.Invoke(ctx, User_Logout_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *userClient) ChangePassword(ctx context.Context, in *ChangePasswordReq, opts ...grpc.CallOption) (*ChangePasswordResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ChangePasswordResp)
+	err := c.cc.Invoke(ctx, User_ChangePassword_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -132,15 +159,20 @@ func (c *userClient) DeleteUser(ctx context.Context, in *DeleteUserReq, opts ...
 // All implementations must embed UnimplementedUserServer
 // for forward compatibility.
 type UserServer interface {
+	// 获取用户
 	GetUser(context.Context, *GetUserReq) (*GetUserResp, error)
 	// 用户注册
 	Register(context.Context, *RegisterReq) (*RegisterResp, error)
 	// 用户登录（手机号+密码）
 	Login(context.Context, *LoginReq) (*LoginResp, error)
+	// 刷新 token
+	RefreshToken(context.Context, *RefreshTokenReq) (*RefreshTokenResp, error)
 	// 用户列表（分页）
 	ListUsers(context.Context, *ListUsersReq) (*ListUsersResp, error)
-	// 用户登出（token 从 Authorization header 获取，不再通过 body 传递）
+	// 用户登出（token 从 Authorization header 获取）
 	Logout(context.Context, *LogoutReq) (*LogoutResp, error)
+	// 修改密码（需登录，从 Authorization header 获取 token）
+	ChangePassword(context.Context, *ChangePasswordReq) (*ChangePasswordResp, error)
 	// 更新用户资料
 	UpdateUser(context.Context, *UpdateUserReq) (*UpdateUserResp, error)
 	// 删除用户（软删除）
@@ -164,11 +196,17 @@ func (UnimplementedUserServer) Register(context.Context, *RegisterReq) (*Registe
 func (UnimplementedUserServer) Login(context.Context, *LoginReq) (*LoginResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method Login not implemented")
 }
+func (UnimplementedUserServer) RefreshToken(context.Context, *RefreshTokenReq) (*RefreshTokenResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method RefreshToken not implemented")
+}
 func (UnimplementedUserServer) ListUsers(context.Context, *ListUsersReq) (*ListUsersResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListUsers not implemented")
 }
 func (UnimplementedUserServer) Logout(context.Context, *LogoutReq) (*LogoutResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method Logout not implemented")
+}
+func (UnimplementedUserServer) ChangePassword(context.Context, *ChangePasswordReq) (*ChangePasswordResp, error) {
+	return nil, status.Error(codes.Unimplemented, "method ChangePassword not implemented")
 }
 func (UnimplementedUserServer) UpdateUser(context.Context, *UpdateUserReq) (*UpdateUserResp, error) {
 	return nil, status.Error(codes.Unimplemented, "method UpdateUser not implemented")
@@ -251,6 +289,24 @@ func _User_Login_Handler(srv interface{}, ctx context.Context, dec func(interfac
 	return interceptor(ctx, in, info, handler)
 }
 
+func _User_RefreshToken_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RefreshTokenReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServer).RefreshToken(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: User_RefreshToken_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServer).RefreshToken(ctx, req.(*RefreshTokenReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _User_ListUsers_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ListUsersReq)
 	if err := dec(in); err != nil {
@@ -283,6 +339,24 @@ func _User_Logout_Handler(srv interface{}, ctx context.Context, dec func(interfa
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(UserServer).Logout(ctx, req.(*LogoutReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _User_ChangePassword_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ChangePasswordReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(UserServer).ChangePassword(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: User_ChangePassword_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(UserServer).ChangePassword(ctx, req.(*ChangePasswordReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -343,12 +417,20 @@ var User_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _User_Login_Handler,
 		},
 		{
+			MethodName: "RefreshToken",
+			Handler:    _User_RefreshToken_Handler,
+		},
+		{
 			MethodName: "ListUsers",
 			Handler:    _User_ListUsers_Handler,
 		},
 		{
 			MethodName: "Logout",
 			Handler:    _User_Logout_Handler,
+		},
+		{
+			MethodName: "ChangePassword",
+			Handler:    _User_ChangePassword_Handler,
 		},
 		{
 			MethodName: "UpdateUser",

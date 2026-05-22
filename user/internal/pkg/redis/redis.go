@@ -13,8 +13,9 @@ import (
 
 // #12 fix: Redis key 前缀常量（统一维护，Lua 脚本通过 ARGV 传入，不再硬编码）
 const (
-	tokenKeyPrefix     = "storemicro:user:token:"
-	userTokenMapPrefix = "storemicro:user:token_map:"
+	tokenKeyPrefix        = "storemicro:user:token:"
+	userTokenMapPrefix    = "storemicro:user:token_map:"
+	refreshTokenKeyPrefix = "storemicro:user:refresh_token:"
 )
 
 // hashToken 计算 token 的 SHA-256 哈希，用于 Redis key 存储（防止 Redis 被攻破泄露原始 token）
@@ -157,4 +158,28 @@ func (r *Redis) InvalidateUserTokens(ctx context.Context, userID int64) error {
 // Close 关闭 Redis 连接
 func (r *Redis) Close() error {
 	return r.client.Close()
+}
+
+// SetRefreshToken 存储 refresh token（sha256(token) -> userID，有效期 hours）
+func (r *Redis) SetRefreshToken(ctx context.Context, token string, userID int64, expireHours int64) error {
+	tokenHash := hashToken(token)
+	return r.client.Set(ctx, refreshTokenKeyPrefix+tokenHash, userID, time.Duration(expireHours)*time.Hour).Err()
+}
+
+// GetRefreshTokenUserID 通过 refresh token 查询 userID
+func (r *Redis) GetRefreshTokenUserID(ctx context.Context, token string) (int64, error) {
+	result := r.client.Get(ctx, refreshTokenKeyPrefix+hashToken(token))
+	if err := result.Err(); err != nil {
+		return 0, err
+	}
+	var userID int64
+	if err := result.Scan(&userID); err != nil {
+		return 0, err
+	}
+	return userID, nil
+}
+
+// DeleteRefreshToken 删除 refresh token
+func (r *Redis) DeleteRefreshToken(ctx context.Context, token string) error {
+	return r.client.Del(ctx, refreshTokenKeyPrefix+hashToken(token)).Err()
 }

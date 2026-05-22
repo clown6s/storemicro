@@ -109,6 +109,7 @@ func main() {
 	}
 	zapLogger := pkglog.New(logCfg)
 	log.SetLogger(zapLogger)
+	defer pkglog.L().Sync()
 
 	// #28: 配置加载完成后恢复 stdlog 输出，避免全局抑制第三方包日志
 	stdlog.SetOutput(os.Stderr)
@@ -148,10 +149,15 @@ func main() {
 			if etcdClient != nil {
 				etcdClient.Close()
 			}
+			// etcd Timeout 防御性校验：0 或负值回退到 5 秒
+			etcdTimeout := bc.Registry.Etcd.Timeout
+			if etcdTimeout <= 0 {
+				etcdTimeout = 5
+			}
 			var err error
 			etcdClient, err = clientv3.New(clientv3.Config{
 				Endpoints:   bc.Registry.Etcd.Endpoints,
-				DialTimeout: time.Duration(bc.Registry.Etcd.Timeout) * time.Second,
+				DialTimeout: time.Duration(etcdTimeout) * time.Second,
 			})
 			return err
 		},
@@ -163,7 +169,7 @@ func main() {
 	reg := etcd2.New(etcdClient)
 	helper.Infow("msg", "etcd registry connected", "endpoints", bc.Registry.Etcd.Endpoints)
 
-	app, appData, cleanup, err := wireApp(bc.Server, bc.Data, zapLogger, reg)
+	result, cleanup, err := wireApp(bc.Server, bc.Data, zapLogger, reg)
 	if err != nil {
 		helper.Errorf("failed to wire app: %v", err)
 		os.Exit(1)
@@ -182,10 +188,10 @@ func main() {
 		}
 		healthAddr = hp
 	}
-	healthSrv := startHealthServer(healthAddr, helper, appData)
+	healthSrv := startHealthServer(healthAddr, helper, result.AppData)
 
 	// 启动服务（阻塞，内部监听信号并优雅退出）
-	if err := app.Run(); err != nil {
+	if err := result.App.Run(); err != nil {
 		helper.Errorf("failed to run app: %v", err)
 		os.Exit(1)
 	}

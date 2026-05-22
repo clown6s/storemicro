@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"sync"
 	"syscall"
 	"time"
 
@@ -18,8 +17,6 @@ import (
 	pkgtracing "github.com/storemicro/pkg/tracing"
 	pkglog "github.com/storemicro/pkg/zaplogger"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/connectivity"
 
 	"gateway/internal/appconfig"
 	gwproxy "gateway/internal/proxy"
@@ -144,21 +141,7 @@ func main() {
 		pkglog.L().Error("gateway forced shutdown", zap.Error(err))
 	}
 
-	// #15: 等待 in-flight gRPC 请求 drain（并行等待，最多 5 秒）
-	drainCtx, drainCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer drainCancel()
-	var drainWg sync.WaitGroup
-	for _, conn := range proxy.Conns() {
-		if conn == nil {
-			continue
-		}
-		drainWg.Add(1)
-		go func(c *grpc.ClientConn) {
-			defer drainWg.Done()
-			c.WaitForStateChange(drainCtx, connectivity.Ready)
-		}(conn)
-	}
-	drainWg.Wait()
+	// 关闭 gRPC 连接（Close 内部会等待 in-flight RPC 完成）
 	proxy.Close()
 
 	pkglog.L().Info("gateway stopped")

@@ -160,10 +160,12 @@ func keepAlive(etcdClient *clientv3.Client, leaseID clientv3.LeaseID, key string
 		nodeReady = false
 		readyMu.Unlock()
 		// 尝试在同一 goroutine 中重新抢锁，避免 ID 碰撞
-		if retryKeepAliveOnce(etcdClient, key) {
+		if retryKeepAliveOnce(etcdClient, key, leaseID) {
 			return // 成功重新获取 lease
 		}
-		return // 重试失败
+		// 同步重试全部失败，启动后台持续恢复，避免 GenID 永久失效
+		go retryRecover(etcdClient, key)
+		return
 	}
 
 	for {
@@ -178,10 +180,12 @@ func keepAlive(etcdClient *clientv3.Client, leaseID clientv3.LeaseID, key string
 				nodeReady = false
 				readyMu.Unlock()
 				// 在同一 goroutine 中重试，不创建新 goroutine
-				if retryKeepAliveOnce(etcdClient, key) {
+				if retryKeepAliveOnce(etcdClient, key, leaseID) {
 					return // 成功重新获取 lease
 				}
-				return // 重试失败
+				// 同步重试全部失败，启动后台持续恢复，避免 GenID 永久失效
+				go retryRecover(etcdClient, key)
+				return
 			}
 			_ = resp
 		}
@@ -189,7 +193,8 @@ func keepAlive(etcdClient *clientv3.Client, leaseID clientv3.LeaseID, key string
 }
 
 // retryKeepAliveOnce 租约丢失后尝试重新抢锁（多次重试 + 指数退避，在同一 goroutine 中执行）
-func retryKeepAliveOnce(etcdClient *clientv3.Client, key string) bool {
+// oldLeaseID: 已失败的旧租约，用于重试全部失败后释放，防止 lease 泄漏
+func retryKeepAliveOnce(etcdClient *clientv3.Client, key string, oldLeaseID clientv3.LeaseID) bool {
 	ctx := shutdownCtx
 
 	select {
@@ -287,6 +292,10 @@ func retryKeepAliveOnce(etcdClient *clientv3.Client, key string) bool {
 	}
 
 	zap.L().Error("snowflake: all re-acquire attempts exhausted, GenID temporarily disabled - will retry in background")
+	// 释放旧的失败租约，防止 lease 泄漏
+	if oldLeaseID != 0 {
+		_, _ = etcdClient.Revoke(ctx, oldLeaseID)
+	}
 	return false
 }
 

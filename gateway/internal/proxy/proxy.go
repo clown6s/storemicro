@@ -142,6 +142,7 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 		grpc.WithDefaultServiceConfig(serviceCfg),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
 		grpc.WithUnaryInterceptor(circuitbreaker.UnaryInterceptor(cbCfg, serviceNames)),
+		grpc.WithStreamInterceptor(circuitbreaker.StreamInterceptor(cbCfg, serviceNames)),
 		grpc.WithDefaultCallOptions(
 			grpc.MaxCallRecvMsgSize(cfg.GrpcClient.MaxRecvMsgSize*1024*1024),
 			grpc.MaxCallSendMsgSize(cfg.GrpcClient.MaxSendMsgSize*1024*1024),

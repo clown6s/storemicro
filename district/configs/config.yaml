@@ -6,7 +6,7 @@ server:
 data:
   database:
     driver: mysql
-    source: "root:admin@zzp@tcp(10.211.55.5:3306)/store_micro?charset=utf8mb4&parseTime=true&loc=Local"
+    source: "root:${DB_PASSWORD:admin@zzp}@tcp(${DB_HOST:10.211.55.5}:${DB_PORT:3306})/store_micro?charset=utf8mb4&parseTime=true&loc=Local"
     maxOpenConns: 100
     maxIdleConns: 25
     connMaxLifetime: 3600
@@ -21,7 +21,7 @@ logger:
 registry:
   etcd:
     endpoints:
-      - "10.211.55.5:2379"
+      - "${ETCD_ENDPOINT:10.211.55.5:2379}"
     timeout: 10
 
 tracing:

@@ -43,9 +43,7 @@ func (s *UserService) GetUser(ctx context.Context, req *userv1.GetUserReq) (*use
 		return nil, s.mapError(err)
 	}
 	return &userv1.GetUserResp{
-		Code:    200,
-		Message: "success",
-		Data:    s.toUserInfo(user),
+		Data: s.toUserInfo(user),
 	}, nil
 }
 
@@ -75,8 +73,7 @@ func (s *UserService) Register(ctx context.Context, req *userv1.RegisterReq) (*u
 	}
 
 	return &userv1.RegisterResp{
-		Code:    200,
-		Message: "registered",
+		Id: user.ID,
 	}, nil
 }
 
@@ -95,50 +92,26 @@ func (s *UserService) Login(ctx context.Context, req *userv1.LoginReq) (*userv1.
 	}
 
 	return &userv1.LoginResp{
-		Code:    200,
-		Message: "success",
-		Token:   token,
-		Data:    s.toUserInfo(user),
+		Token: token,
+		Data:  s.toUserInfo(user),
 	}, nil
 }
 
-// Logout 用户登出（token 从 gRPC metadata Authorization header 获取）
-func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv1.LogoutResp, error) {
-	zap.L().Debug("Logout called")
+// RefreshToken 刷新 token
+func (s *UserService) RefreshToken(ctx context.Context, req *userv1.RefreshTokenReq) (*userv1.RefreshTokenResp, error) {
+	zap.L().Debug("RefreshToken called")
 
-	// 从 gRPC metadata 读取 Authorization header（gateway 转发）
-	token := extractTokenFromMetadata(ctx)
-	if token == "" {
-		return nil, status.Error(codes.Unauthenticated, "missing authorization token")
-	}
-
-	if err := s.uc.Logout(ctx, token); err != nil {
-		zap.L().Warn("Logout failed", zap.Error(err))
+	token, refreshToken, user, err := s.uc.RefreshToken(ctx, req.RefreshToken)
+	if err != nil {
+		zap.L().Warn("RefreshToken failed", zap.Error(err))
 		return nil, s.mapError(err)
 	}
 
-	return &userv1.LogoutResp{
-		Code:    200,
-		Message: "logged out",
+	return &userv1.RefreshTokenResp{
+		Token:        token,
+		RefreshToken: refreshToken,
+		Data:         s.toUserInfo(user),
 	}, nil
-}
-
-// extractTokenFromMetadata 从 gRPC metadata 提取 Bearer token（仅接受 Bearer scheme）
-func extractTokenFromMetadata(ctx context.Context) string {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return ""
-	}
-	// grpc-gateway 转发 HTTP header 时 key 会转小写
-	values := md.Get("authorization")
-	if len(values) == 0 {
-		return ""
-	}
-	authHeader := values[0]
-	if !strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
-		return "" // 仅接受 Bearer scheme，拒绝 Basic/Digest/其他
-	}
-	return strings.TrimSpace(authHeader[7:])
 }
 
 // ListUsers 用户列表（分页）
@@ -162,13 +135,71 @@ func (s *UserService) ListUsers(ctx context.Context, req *userv1.ListUsersReq) (
 	}
 
 	return &userv1.ListUsersResp{
-		Code:     200,
-		Message:  "success",
 		Data:     list,
 		Total:    total,
 		Page:     req.Page,
 		PageSize: req.PageSize,
 	}, nil
+}
+
+// Logout 用户登出（token 从 gRPC metadata Authorization header 获取）
+func (s *UserService) Logout(ctx context.Context, req *userv1.LogoutReq) (*userv1.LogoutResp, error) {
+	zap.L().Debug("Logout called")
+
+	// 从 gRPC metadata 读取 Authorization header（gateway 转发）
+	token := extractTokenFromMetadata(ctx)
+	if token == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing authorization token")
+	}
+
+	if err := s.uc.Logout(ctx, token); err != nil {
+		zap.L().Warn("Logout failed", zap.Error(err))
+		return nil, s.mapError(err)
+	}
+
+	return &userv1.LogoutResp{}, nil
+}
+
+// ChangePassword 修改密码
+func (s *UserService) ChangePassword(ctx context.Context, req *userv1.ChangePasswordReq) (*userv1.ChangePasswordResp, error) {
+	zap.L().Debug("ChangePassword called")
+
+	// 从 gRPC metadata 获取 token → userID
+	token := extractTokenFromMetadata(ctx)
+	if token == "" {
+		return nil, status.Error(codes.Unauthenticated, "missing authorization token")
+	}
+
+	// 通过 token 获取 userID（从 Redis 查询）
+	userID, err := s.uc.GetUserIDByToken(ctx, token)
+	if err != nil {
+		return nil, status.Error(codes.Unauthenticated, "invalid or expired token")
+	}
+
+	if err := s.uc.ChangePassword(ctx, userID, req.OldPassword, req.NewPassword); err != nil {
+		zap.L().Warn("ChangePassword failed", zap.Error(err))
+		return nil, s.mapError(err)
+	}
+
+	return &userv1.ChangePasswordResp{}, nil
+}
+
+// extractTokenFromMetadata 从 gRPC metadata 提取 Bearer token（仅接受 Bearer scheme）
+func extractTokenFromMetadata(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	// grpc-gateway 转发 HTTP header 时 key 会转小写
+	values := md.Get("authorization")
+	if len(values) == 0 {
+		return ""
+	}
+	authHeader := values[0]
+	if !strings.HasPrefix(strings.ToLower(authHeader), "bearer ") {
+		return "" // 仅接受 Bearer scheme，拒绝 Basic/Digest/其他
+	}
+	return strings.TrimSpace(authHeader[7:])
 }
 
 // UpdateUser 更新用户资料
@@ -214,10 +245,7 @@ func (s *UserService) UpdateUser(ctx context.Context, req *userv1.UpdateUserReq)
 		return nil, s.mapError(err)
 	}
 
-	return &userv1.UpdateUserResp{
-		Code:    200,
-		Message: "updated",
-	}, nil
+	return &userv1.UpdateUserResp{}, nil
 }
 
 // DeleteUser 删除用户（软删除）
@@ -233,10 +261,7 @@ func (s *UserService) DeleteUser(ctx context.Context, req *userv1.DeleteUserReq)
 		return nil, s.mapError(err)
 	}
 
-	return &userv1.DeleteUserResp{
-		Code:    200,
-		Message: "deleted",
-	}, nil
+	return &userv1.DeleteUserResp{}, nil
 }
 
 // ---- 辅助方法 ----
@@ -287,7 +312,8 @@ func (s *UserService) mapError(err error) error {
 		errors.Is(err, biz.ErrEmailTooLong),
 		errors.Is(err, biz.ErrPasswordNoSpecial),
 		errors.Is(err, biz.ErrInvalidGender),
-		errors.Is(err, biz.ErrInvalidAge):
+		errors.Is(err, biz.ErrInvalidAge),
+		errors.Is(err, biz.ErrWrongOldPassword):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:
 		zap.L().Error("unexpected user error", zap.Error(err))

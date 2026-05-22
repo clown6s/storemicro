@@ -7,6 +7,9 @@
 package main
 
 import (
+	"github.com/go-kratos/kratos/v2"
+	"github.com/go-kratos/kratos/v2/log"
+	"github.com/go-kratos/kratos/v2/registry"
 	"user/internal/biz"
 	"user/internal/conf"
 	"user/internal/data"
@@ -14,37 +17,47 @@ import (
 	"user/internal/pkg/redis"
 	"user/internal/server"
 	"user/internal/service"
-
-	"github.com/go-kratos/kratos/v2"
-	"github.com/go-kratos/kratos/v2/log"
-	"github.com/go-kratos/kratos/v2/registry"
 )
 
-func wireApp(confServer *conf.Server, confData *conf.Data, confJwt *conf.Jwt, confRedis *conf.Redis, logger log.Logger, reg registry.Registrar) (*kratos.App, *data.Data, func(), error) {
-	// Redis
-	r, err := redis.NewRedis(confRedis.Addr, confRedis.Password, int(confRedis.Db))
+// Injectors from wire.go:
+
+func wireApp(confServer *conf.Server, confData *conf.Data, jwt *conf.Jwt, redis *conf.Redis, logger log.Logger, registrar registry.Registrar) (wireResult, func(), error) {
+	redisRedis, err := newRedis(redis)
 	if err != nil {
-		return nil, nil, nil, err
+		return wireResult{}, nil, err
 	}
-
-	// Data（数据库 + Redis）
-	dataData, cleanup, err := data.NewData(confData, r)
+	dataData, cleanup, err := data.NewData(confData, redisRedis)
 	if err != nil {
-		r.Close()
-		return nil, nil, nil, err
+		return wireResult{}, nil, err
 	}
-
-	// JWT
-	j := jwt.NewJWT(confJwt.Secret, confJwt.ExpireHours)
-
-	// Repo → Usecase → Service → gRPC Server → App
 	userRepo := data.NewUserRepo(dataData)
-	userUsecase := biz.NewUserUsecase(userRepo, j, r)
+	jwtJWT := newJWT(jwt)
+	userUsecase := biz.NewUserUsecase(userRepo, jwtJWT, redisRedis)
 	userService := service.NewUserService(userUsecase)
 	grpcServer := server.NewGRPCServer(confServer, logger, userService)
-	app := newApp(logger, grpcServer, reg)
-
-	return app, dataData, func() {
+	app := newApp(logger, grpcServer, registrar)
+	mainWireResult := newWireResult(app, dataData)
+	return mainWireResult, func() {
 		cleanup()
 	}, nil
+}
+
+// wire.go:
+
+// wireResult Wire 注入结果（Wire 不支持多返回值，用结构体打包）
+type wireResult struct {
+	App     *kratos.App
+	AppData *data.Data
+}
+
+func newWireResult(app *kratos.App, appData *data.Data) wireResult {
+	return wireResult{App: app, AppData: appData}
+}
+
+func newJWT(c *conf.Jwt) *jwt.JWT {
+	return jwt.NewJWT(c.Secret, c.ExpireHours)
+}
+
+func newRedis(c *conf.Redis) (*redis.Redis, error) {
+	return redis.NewRedis(c.Addr, c.Password, int(c.Db))
 }

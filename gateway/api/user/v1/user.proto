@@ -1,14 +1,16 @@
 syntax = "proto3";
 
 // v1 — 用户服务 API（稳定版）
-// WARNING: 此文件与 user/api/user/v1/user.proto 保持同步，修改时需同步更新两处
+// WARNING: 此文件与 gateway/api/user/v1/user.proto 保持同步，修改时需同步更新两处
 package api.user.v1;
 
 option go_package = "user/api/user/v1;userv1";
 
 import "google/api/annotations.proto";
+import "google/protobuf/timestamp.proto";
 
 service User {
+  // 获取用户
   rpc GetUser (GetUserReq) returns (GetUserResp) {
     option (google.api.http) = {
       get: "/api/v1/user/{id}"
@@ -28,16 +30,30 @@ service User {
       body: "*"
     };
   }
+  // 刷新 token
+  rpc RefreshToken (RefreshTokenReq) returns (RefreshTokenResp) {
+    option (google.api.http) = {
+      post: "/api/v1/user/refresh-token"
+      body: "*"
+    };
+  }
   // 用户列表（分页）
   rpc ListUsers (ListUsersReq) returns (ListUsersResp) {
     option (google.api.http) = {
       get: "/api/v1/user/list"
     };
   }
-  // 用户登出（token 从 Authorization header 获取，不再通过 body 传递）
+  // 用户登出（token 从 Authorization header 获取）
   rpc Logout (LogoutReq) returns (LogoutResp) {
     option (google.api.http) = {
       post: "/api/v1/user/logout"
+    };
+  }
+  // 修改密码（需登录，从 Authorization header 获取 token）
+  rpc ChangePassword (ChangePasswordReq) returns (ChangePasswordResp) {
+    option (google.api.http) = {
+      put: "/api/v1/user/password"
+      body: "*"
     };
   }
   // 更新用户资料
@@ -60,40 +76,37 @@ message GetUserReq {
 }
 
 message GetUserResp {
-  uint32 code = 1;
-  string message = 2;
-  UserInfo data = 3;
+  UserInfo data = 1;
 }
 
 // 用户实体（不含密码）
 message UserInfo {
-  int64  id          = 1;
-  string email       = 2;
-  string phone       = 3;
-  string realName    = 4;
-  string avatar      = 5;
-  int32  gender      = 6;
-  int32  age         = 7;
-  string createTime  = 8;  // TODO: 迁移为 google.protobuf.Timestamp
-  string updateTime  = 9;  // TODO: 迁移为 google.protobuf.Timestamp
-  string remark      = 10;
+  int64                        id         = 1;
+  string                       email      = 2;
+  string                       phone      = 3;
+  string                       realName   = 4;
+  string                       avatar     = 5;
+  int32                        gender     = 6;
+  int32                        age        = 7;
+  google.protobuf.Timestamp     createTime = 8;
+  google.protobuf.Timestamp     updateTime = 9;
+  string                       remark     = 10;
 }
 
 // 注册
 message RegisterReq {
-  string phone      = 1;
-  string password   = 2;
-  string email      = 3;
-  string realName  = 4;
-  string avatar     = 5;
-  int32  gender     = 6;
-  int32  age        = 7;
-  string remark     = 8;
+  string phone    = 1;
+  string password = 2;
+  string email    = 3;
+  string realName = 4;
+  string avatar   = 5;
+  int32  gender   = 6;
+  int32  age      = 7;
+  string remark   = 8;
 }
 
 message RegisterResp {
-  uint32 code = 1;
-  string message = 2;
+  int64 id = 1;
 }
 
 // 登录
@@ -103,18 +116,27 @@ message LoginReq {
 }
 
 message LoginResp {
-  uint32 code    = 1;
-  string message = 2;
-  string token   = 3;
-  UserInfo data  = 4;
+  string    token = 1;
+  UserInfo data   = 2;
+}
+
+// 刷新 token
+message RefreshTokenReq {
+  string refreshToken = 1;
+}
+
+message RefreshTokenResp {
+  string    token        = 1;
+  string    refreshToken = 2;
+  UserInfo data         = 3;
 }
 
 // 用户列表（分页）
 message ListUsersReq {
-  int32  page        = 1;
-  int32  pageSize    = 2;
-  string phone       = 3;
-  string name        = 4;
+  int32  page     = 1;
+  int32  pageSize = 2;
+  string phone    = 3;
+  string name     = 4;
   // 排序字段（白名单校验：id, createTime, updateTime），默认 "id"
   string sortBy    = 5;
   // 排序方向："asc" 或 "desc"，默认 "desc"
@@ -122,46 +144,43 @@ message ListUsersReq {
 }
 
 message ListUsersResp {
-  uint32         code      = 1;
-  string         message   = 2;
-  int64          total     = 3;
-  int32          page      = 4;
-  int32          pageSize = 5;
-  repeated UserInfo data   = 6;
+  int64            total    = 1;
+  int32            page     = 2;
+  int32            pageSize = 3;
+  repeated UserInfo data    = 4;
 }
 
-// 登出（token 从 Authorization header 获取，消息体无需传 token）
+// 登出（token 从 Authorization header 获取）
 message LogoutReq {}
 
-message LogoutResp {
-  uint32 code    = 1;
-  string message = 2;
+message LogoutResp {}
+
+// 修改密码（需登录）
+message ChangePasswordReq {
+  string oldPassword = 1;
+  string newPassword = 2;
 }
+
+message ChangePasswordResp {}
 
 // 更新用户
 message UpdateUserReq {
-  int64  id        = 1;
-  string email     = 2;
-  string realName = 3;
-  string avatar    = 4;
-  optional int32  gender    = 5;
-  optional int32  age       = 6;
-  string remark    = 7;
+  int64            id        = 1;
+  string           email     = 2;
+  string           realName  = 3;
+  string           avatar    = 4;
+  optional int32   gender    = 5;
+  optional int32   age       = 6;
+  string           remark    = 7;
   // 标记需要强制清空的字段名（如 "email","remark"），不填则空值不更新
-  repeated string forceClearFields = 8;
+  repeated string  forceClearFields = 8;
 }
 
-message UpdateUserResp {
-  uint32 code    = 1;
-  string message = 2;
-}
+message UpdateUserResp {}
 
 // 删除用户
 message DeleteUserReq {
   int64 id = 1;
 }
 
-message DeleteUserResp {
-  uint32 code    = 1;
-  string message = 2;
-}
+message DeleteUserResp {}

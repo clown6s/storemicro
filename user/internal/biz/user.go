@@ -19,6 +19,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // ProviderSet is biz providers.
@@ -54,6 +55,7 @@ var (
 	ErrEmailTooLong      = errors.New("email too long (max 254)")
 	ErrInvalidGender     = errors.New("gender must be 0 (unknown), 1 (male), or 2 (female)")
 	ErrInvalidAge        = errors.New("age must be between 0 and 150")
+	ErrWrongOldPassword  = errors.New("old password is incorrect")
 )
 
 // 手机号和邮箱格式正则
@@ -77,7 +79,7 @@ var dummyHashErr error
 func getDummyHash() []byte {
 	dummyHashOnce.Do(func() {
 		for attempt := 1; attempt <= 3; attempt++ {
-			dummyHash, dummyHashErr = bcrypt.GenerateFromPassword([]byte("dummy-timing-safe-hash"), bcrypt.DefaultCost)
+			dummyHash, dummyHashErr = bcrypt.GenerateFromPassword([]byte("dummy-timing-safe-hash"), 12)
 			if dummyHashErr == nil {
 				return
 			}
@@ -100,8 +102,8 @@ type User struct {
 	Age          int32
 	Phone        string
 	Email        string
-	CreateTime   string
-	UpdateTime   string
+	CreateTime   *timestamppb.Timestamp
+	UpdateTime   *timestamppb.Timestamp
 	Remark       string
 	DeletedAt    string
 	UpdateFields map[string]bool // 需要强制更新为零值的字段名
@@ -116,6 +118,7 @@ type UserRepo interface {
 	GetByPhone(ctx context.Context, phone string) (*User, error)
 	List(ctx context.Context, page, pageSize int32, phone, name, sortBy, sortOrder string) ([]*User, int64, error)
 	UpdateTx(ctx context.Context, user *User) error // 事务更新（含唯一性检查）
+	UpdatePassword(ctx context.Context, id int64, hashedPassword string) error
 	Delete(ctx context.Context, id int64) error
 	RegisterTx(ctx context.Context, user *User) error // 事务注册（含唯一性检查）
 }
@@ -206,7 +209,7 @@ func (uc *UserUsecase) Register(ctx context.Context, user *User) error {
 	}
 
 	// bcrypt 加密密码
-	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(user.Password), 12)
 	if err != nil {
 		zap.L().Error("bcrypt hash failed", zap.Error(err))
 		return ErrEncryptPassword
@@ -252,7 +255,7 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 		}
 		// 数据库错误，包装为内部错误返回（避免泄露连接信息）
 		zap.L().Error("login failed: db error", zap.String("phone", pkgstr.MaskPhone(phone)), zap.Error(err))
-		return "", nil, fmt.Errorf("internal error")
+		return "", nil, fmt.Errorf("internal error: %w", err)
 	}
 	// #14 fix: GetByPhone 返回后立即 defer 清除密码 hash，确保所有错误路径都不会泄露
 	defer user.ClearPassword()
@@ -303,6 +306,14 @@ func (uc *UserUsecase) Logout(ctx context.Context, token string) error {
 
 	zap.L().Info("user logged out", zap.Int64("userID", userID))
 	return nil
+}
+
+// GetUserIDByToken 通过 token 获取 userID（供 service 层鉴权使用）
+func (uc *UserUsecase) GetUserIDByToken(ctx context.Context, token string) (int64, error) {
+	if token == "" {
+		return 0, ErrTokenRequired
+	}
+	return uc.redis.GetUserIDByToken(ctx, token)
 }
 
 // ListUsers sortBy 白名单（service 层防御性校验，data 层有独立校验做兜底）
@@ -408,4 +419,112 @@ func (uc *UserUsecase) Delete(ctx context.Context, id int64) error {
 	}
 	zap.L().Info("user deleted", zap.Int64("id", id))
 	return nil
+}
+
+// ChangePassword 修改密码（需验证旧密码）
+func (uc *UserUsecase) ChangePassword(ctx context.Context, userID int64, oldPassword, newPassword string) error {
+	if oldPassword == "" || newPassword == "" {
+		return ErrPasswordRequired
+	}
+	if len(newPassword) < 8 {
+		return ErrPasswordTooShort
+	}
+	if len(newPassword) > 72 {
+		return ErrPasswordTooLong
+	}
+	if !hasUpper.MatchString(newPassword) {
+		return ErrPasswordNoUpper
+	}
+	if !hasLower.MatchString(newPassword) {
+		return ErrPasswordNoLower
+	}
+	if !hasDigit.MatchString(newPassword) {
+		return ErrPasswordNoDigit
+	}
+	if !hasSpecial.MatchString(newPassword) {
+		return ErrPasswordNoSpecial
+	}
+
+	// 获取用户当前密码
+	user, err := uc.repo.Get(ctx, userID)
+	if err != nil {
+		return err
+	}
+
+	// 验证旧密码
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(oldPassword)); err != nil {
+		return ErrWrongOldPassword
+	}
+
+	// 加密新密码
+	hashedPwd, err := bcrypt.GenerateFromPassword([]byte(newPassword), 12)
+	if err != nil {
+		zap.L().Error("bcrypt hash failed for password change", zap.Int64("id", userID), zap.Error(err))
+		return ErrEncryptPassword
+	}
+
+	// 更新密码
+	if err := uc.repo.UpdatePassword(ctx, userID, string(hashedPwd)); err != nil {
+		zap.L().Error("update password failed", zap.Int64("id", userID), zap.Error(err))
+		return err
+	}
+
+	// 修改密码后使该用户所有 token 失效
+	if invalidateErr := uc.redis.InvalidateUserTokens(ctx, userID); invalidateErr != nil {
+		zap.L().Error("change password: failed to invalidate tokens",
+			zap.Int64("id", userID), zap.Error(invalidateErr))
+	}
+
+	zap.L().Info("password changed", zap.Int64("id", userID))
+	return nil
+}
+
+// RefreshToken 使用 refresh token 刷新 access token
+func (uc *UserUsecase) RefreshToken(ctx context.Context, refreshToken string) (string, string, *User, error) {
+	if refreshToken == "" {
+		return "", "", nil, ErrTokenRequired
+	}
+
+	// 从 Redis 获取 refresh token 对应的 userID
+	userID, err := uc.redis.GetRefreshTokenUserID(ctx, refreshToken)
+	if err != nil {
+		return "", "", nil, fmt.Errorf("invalid or expired refresh token: %w", err)
+	}
+
+	// 获取用户信息
+	user, err := uc.repo.Get(ctx, userID)
+	if err != nil {
+		return "", "", nil, err
+	}
+
+	// 生成新的 access token
+	token, err := uc.jwt.GenerateToken(user.ID)
+	if err != nil {
+		zap.L().Error("refresh: generate token failed", zap.Int64("id", user.ID), zap.Error(err))
+		return "", "", nil, ErrGenerateToken
+	}
+
+	// 存储 access token 到 Redis
+	expireHours := uc.jwt.ExpireHours()
+	if err := uc.redis.SetToken(ctx, token, user.ID, expireHours); err != nil {
+		zap.L().Error("refresh: store token failed", zap.Int64("id", user.ID), zap.Error(err))
+		return "", "", nil, ErrStoreToken
+	}
+
+	// 生成新的 refresh token（旋转策略）
+	newRefreshToken, err := uc.jwt.GenerateRefreshToken(user.ID)
+	if err != nil {
+		zap.L().Error("refresh: generate refresh token failed", zap.Int64("id", user.ID), zap.Error(err))
+		return "", "", nil, ErrGenerateToken
+	}
+
+	// 删除旧 refresh token，存储新 refresh token（7 天有效期）
+	_ = uc.redis.DeleteRefreshToken(ctx, refreshToken)
+	if err := uc.redis.SetRefreshToken(ctx, newRefreshToken, user.ID, 168); err != nil {
+		zap.L().Error("refresh: store refresh token failed", zap.Int64("id", user.ID), zap.Error(err))
+		return "", "", nil, ErrStoreToken
+	}
+
+	zap.L().Info("token refreshed", zap.Int64("id", user.ID))
+	return token, newRefreshToken, user, nil
 }

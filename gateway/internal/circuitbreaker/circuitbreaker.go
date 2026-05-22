@@ -174,3 +174,20 @@ func UnaryInterceptor(cfg *Config, serviceNames []string) grpc.UnaryClientInterc
 		return err
 	}
 }
+
+// StreamInterceptor 返回按服务隔离的 gRPC 流式拦截器
+func StreamInterceptor(cfg *Config, serviceNames []string) grpc.StreamClientInterceptor {
+	Init(cfg, serviceNames)
+
+	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
+		serviceName := extractServiceName(method)
+		cb := globalCB.getCB(serviceName)
+		var clientStream grpc.ClientStream
+		_, err := cb.Execute(func() (interface{}, error) {
+			var streamErr error
+			clientStream, streamErr = streamer(ctx, desc, cc, method, opts...)
+			return nil, streamErr
+		})
+		return clientStream, err
+	}
+}

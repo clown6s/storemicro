@@ -144,7 +144,7 @@ services:
         reservations:
           memory: 128M
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9101/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:9101/readyz"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -182,7 +182,7 @@ services:
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:9103/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:9103/readyz"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -223,7 +223,7 @@ services:
         reservations:
           memory: 128M
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/readyz"]
       interval: 10s
       timeout: 5s
       retries: 3

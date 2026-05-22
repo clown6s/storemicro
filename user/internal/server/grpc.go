@@ -45,6 +45,7 @@ type perIPRateLimiter struct {
 	r           rate.Limit // 每秒产生的令牌数
 	burst       int        // 令牌桶容量
 	lastCleanup time.Time
+	stopCh      chan struct{} // 通知 cleanupLoop 退出
 }
 
 // ipEntry 封装限流器和最后使用时间，用于定期清理
@@ -59,6 +60,7 @@ func newPerIPRateLimiter(rps int, burst int, cleanupInterval time.Duration) *per
 		r:           rate.Limit(rps),
 		burst:       burst,
 		lastCleanup: time.Now(),
+		stopCh:      make(chan struct{}),
 	}
 	// 启动后台 goroutine 定期清理过期 IP 条目，防止 map 无限增长导致 OOM
 	go rl.cleanupLoop(cleanupInterval * 2) // 清理周期 = 窗口 × 2，确保不误删活跃 IP
@@ -69,19 +71,24 @@ func newPerIPRateLimiter(rps int, burst int, cleanupInterval time.Duration) *per
 func (rl *perIPRateLimiter) cleanupLoop(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for range ticker.C {
-		rl.mu.Lock()
-		now := time.Now()
-		expired := 0
-		for ip, entry := range rl.limiters {
-			if now.Sub(entry.lastUsed) > interval {
-				delete(rl.limiters, ip)
-				expired++
+	for {
+		select {
+		case <-rl.stopCh:
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			now := time.Now()
+			expired := 0
+			for ip, entry := range rl.limiters {
+				if now.Sub(entry.lastUsed) > interval {
+					delete(rl.limiters, ip)
+					expired++
+				}
 			}
-		}
-		rl.mu.Unlock()
-		if expired > 0 {
-			zap.L().Debug("rate limiter: cleaned up expired IP entries", zap.Int("count", expired))
+			rl.mu.Unlock()
+			if expired > 0 {
+				zap.L().Debug("rate limiter: cleaned up expired IP entries", zap.Int("count", expired))
+			}
 		}
 	}
 }

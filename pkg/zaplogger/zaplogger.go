@@ -201,6 +201,7 @@ func parseLevel(s string) zapcore.Level {
 	case "error", "ERROR":
 		return zapcore.ErrorLevel
 	default:
+		fmt.Fprintf(os.Stderr, "warn: invalid log level %q, falling back to info\n", s)
 		return zapcore.InfoLevel
 	}
 }
