@@ -90,11 +90,10 @@ services:
     container_name: storemicro-redis
     environment:
       TZ: *timezone
-      REDIS_PASSWORD: *password
       REDISCLI_AUTH: *password
     command: >
       redis-server
-      --requirepass ${REDIS_PASSWORD}
+      --requirepass "CHANGE_ME_STRONG_PASSWORD_32CHARS_MIN"
       --appendonly yes
       --appendfsync everysec
       --maxmemory 192mb
@@ -216,6 +215,7 @@ services:
         limits:
           cpus: "1"
           memory: 512M
+          pids: 64
         reservations:
           memory: 128M
     healthcheck:
@@ -225,7 +225,6 @@ services:
       retries: 3
       start_period: 30s
     logging: *logging
-    pids_limit: 64
     ulimits:
       nofile:
         soft: 65536
@@ -267,6 +266,7 @@ services:
         limits:
           cpus: "0.5"
           memory: 256M
+          pids: 64
         reservations:
           memory: 64M
     healthcheck:
@@ -276,7 +276,6 @@ services:
       retries: 3
       start_period: 30s
     logging: *logging
-    pids_limit: 64
     ulimits:
       nofile:
         soft: 65536
@@ -320,16 +319,16 @@ services:
         limits:
           cpus: "1"
           memory: 512M
+          pids: 64
         reservations:
           memory: 128M
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:8080/readyz"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:7000/readyz"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 30s
     logging: *logging
-    pids_limit: 64
     ulimits:
       nofile:
         soft: 65536
