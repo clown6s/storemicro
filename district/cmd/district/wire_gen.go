@@ -8,6 +8,7 @@ package main
 
 import (
 	"district/internal/biz"
+	"district/internal/cache"
 	"district/internal/conf"
 	"district/internal/data"
 	"district/internal/server"
@@ -20,18 +21,23 @@ import (
 // Injectors from wire.go:
 
 func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, registrar registry.Registrar) (wireResult, func(), error) {
+	cacheCache, err := cache.New()
+	if err != nil {
+		return wireResult{}, nil, err
+	}
 	dataData, cleanup, err := data.NewData(confData)
 	if err != nil {
 		return wireResult{}, nil, err
 	}
 	districtRepo := data.NewDistrictRepo(dataData)
-	districtUseCase := biz.NewDistrictUseCase(districtRepo)
+	districtUseCase := biz.NewDistrictUseCase(districtRepo, cacheCache)
 	districtService := service.NewDistrictService(districtUseCase)
 	grpcServer := server.NewGRPCServer(confServer, logger, districtService)
 	app := newApp(logger, grpcServer, registrar)
-	mainWireResult := newWireResult(app, dataData)
+	mainWireResult := newWireResult(app, dataData, cacheCache, districtUseCase)
 	return mainWireResult, func() {
 		cleanup()
+		cacheCache.Close()
 	}, nil
 }
 
@@ -41,8 +47,10 @@ func wireApp(confServer *conf.Server, confData *conf.Data, logger log.Logger, re
 type wireResult struct {
 	App     *kratos.App
 	AppData *data.Data
+	Cache   *cache.Cache
+	UseCase *biz.DistrictUseCase
 }
 
-func newWireResult(app *kratos.App, appData *data.Data) wireResult {
-	return wireResult{App: app, AppData: appData}
+func newWireResult(app *kratos.App, appData *data.Data, c *cache.Cache, uc *biz.DistrictUseCase) wireResult {
+	return wireResult{App: app, AppData: appData, Cache: c, UseCase: uc}
 }

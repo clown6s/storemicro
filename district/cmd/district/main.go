@@ -173,6 +173,11 @@ func main() {
 	}
 	defer cleanup()
 
+	// 预热省市区缓存（启动时从 DB 加载全量数据到 ristretto）
+	warmupCtx, warmupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	result.UseCase.Warmup(warmupCtx)
+	warmupCancel()
+
 	helper.Infow("msg", "service started", "name", Name)
 
 	// 健康检查 HTTP sidecar（默认 :9103，可通过 HEALTH_PORT 环境变量覆盖）
