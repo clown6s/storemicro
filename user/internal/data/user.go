@@ -113,10 +113,21 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, 
 
 	where := strings.Join(conditions, " AND ")
 
-	// 查总数
+	// #18 fix: 使用只读事务确保 COUNT 和 SELECT 快照一致性，避免并发写入导致 total 与结果不匹配
+	tx, err := r.data.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, 0, fmt.Errorf("begin read-only tx failed: %w", err)
+	}
+	defer func() {
+		if err := tx.Rollback(); err != nil && err != sql.ErrTxDone {
+			zap.L().Error("userRepo.List rollback failed", zap.Error(err))
+		}
+	}()
+
+	// 查总数（事务内执行，确保快照一致）
 	var total int64
 	countSQL := fmt.Sprintf("SELECT COUNT(*) FROM user WHERE %s", where)
-	err := r.data.db.QueryRowContext(ctx, countSQL, args...).Scan(&total)
+	err = tx.QueryRowContext(ctx, countSQL, args...).Scan(&total)
 	if err != nil {
 		zap.L().Error("userRepo.List count failed", zap.Error(err))
 		// [M8] 统一错误包装
@@ -134,7 +145,7 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, 
 	}
 	orderBy := sortCol + " " + sortDir
 
-	// 分页查询（int64 防止溢出）
+	// 分页查询（int64 防止溢出，事务内执行）
 	offset := int64(page-1) * int64(pageSize)
 	querySQL := fmt.Sprintf(
 		`SELECT id, COALESCE(real_name,''), COALESCE(avatar,''), gender, COALESCE(age,0),
@@ -144,7 +155,7 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, 
 	)
 	queryArgs := append(args, pageSize, offset)
 
-	rows, err := r.data.db.QueryContext(ctx, querySQL, queryArgs...)
+	rows, err := tx.QueryContext(ctx, querySQL, queryArgs...)
 	if err != nil {
 		zap.L().Error("userRepo.List query failed", zap.Error(err))
 		// [M8] 统一错误包装
@@ -167,6 +178,11 @@ func (r *userRepo) List(ctx context.Context, page, pageSize int32, phone, name, 
 	if err := rows.Err(); err != nil {
 		zap.L().Error("userRepo.List rows error", zap.Error(err))
 		return nil, 0, fmt.Errorf("list users rows error: %w", err)
+	}
+
+	// 提交只读事务（释放快照资源）
+	if err := tx.Commit(); err != nil {
+		return nil, 0, fmt.Errorf("commit read-only tx failed: %w", err)
 	}
 
 	return users, total, nil

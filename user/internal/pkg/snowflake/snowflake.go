@@ -278,10 +278,9 @@ func retryKeepAliveOnce(etcdClient *clientv3.Client, key string) bool {
 					readyMu.Lock()
 					nodeReady = false
 					readyMu.Unlock()
-					// #2: 不再标记为永久死亡，后续 GenID 调用可触发新一轮重试
-					// 通过启动后台 goroutine 持续重试恢复
-					go retryRecover(etcdClient, key)
-					return true
+					// #11 fix: 不再递归启动新 goroutine，回到外层重试循环
+					// 重置 backoff 让外层 for 循环重新开始恢复流程
+					return false
 				}
 			}
 		}
@@ -349,7 +348,7 @@ func retryRecover(etcdClient *clientv3.Client, key string) {
 
 		zap.L().Info("snowflake: recovered after keep-alive loss")
 
-		// 消费 keep-alive 通道
+		// 消费 keep-alive 通道，关闭时回到外层 for 循环重试（不创建新 goroutine）
 		for {
 			select {
 			case <-ctx.Done():
@@ -359,9 +358,10 @@ func retryRecover(etcdClient *clientv3.Client, key string) {
 					readyMu.Lock()
 					nodeReady = false
 					readyMu.Unlock()
-					// 再次丢失，递归重试
-					go retryRecover(etcdClient, key)
-					return
+					// #11 fix: keep-alive 再次丢失，回到外层 for 循环重新恢复
+					// 重置 backoff 避免退避过大导致恢复过慢
+					backoff = 2 * time.Second
+					break // 跳出内层 for，回到外层 for 继续重试
 				}
 			}
 		}

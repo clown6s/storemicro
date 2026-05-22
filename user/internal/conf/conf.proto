@@ -14,20 +14,17 @@ message Bootstrap {
   Tracing   tracing   = 5;
   Jwt       jwt       = 6;
   Redis     redis     = 7;
-  reserved 8 to 99;
 }
 
 message Tracing {
   string endpoint   = 1;  // OTLP gRPC 端点，如 10.211.55.5:4317
-  double sample_rate = 2;  // 采样率 0.0-1.0，默认 0.1
-  reserved 3 to 99;
+  double sampleRate = 2;  // 采样率 0.0-1.0，默认 0.1
 }
 
 message Server {
   message GRPC {
     string                addr = 1;
     google.protobuf.Duration timeout = 2;
-    reserved 3 to 99;
   }
   GRPC grpc = 1;
 }
@@ -35,25 +32,22 @@ message Server {
 message Data {
   message Database {
     string  source          = 1;
-    int64   max_open_conns  = 2;  // 最大打开连接数，默认 100
-    int64   max_idle_conns  = 3;  // 最大空闲连接数，默认 25
-    int64   conn_max_lifetime = 4; // 连接最大存活时间（秒），默认 3600
-    int64   conn_max_idle_time = 5; // 空闲连接最大存活时间（秒），默认 conn_max_lifetime/2
-    reserved 6 to 99;
+    int64   maxOpenConns    = 2;  // 最大打开连接数，默认 100
+    int64   maxIdleConns    = 3;  // 最大空闲连接数，默认 25
+    int64   connMaxLifetime = 4;  // 连接最大存活时间（秒），默认 3600
+    int64   connMaxIdleTime = 5;  // 空闲连接最大存活时间（秒），默认 conn_max_lifetime/2
   }
   Database database = 1;
 }
 
 message Logger {
   string level = 1;
-  reserved 2 to 99;
 }
 
 message Registry {
   message Etcd {
     repeated string endpoints = 1;
     int64     timeout    = 2;
-    reserved 3 to 99;
   }
   Etcd etcd = 1;
 }
@@ -61,8 +55,7 @@ message Registry {
 // JWT 配置
 message Jwt {
   string secret     = 1;  // 签名密钥
-  int64  expire_hours = 2;  // token 有效期（小时）
-  reserved 3 to 99;
+  int64  expireHours = 2;  // token 有效期（小时）
 }
 
 // Redis 配置
@@ -70,5 +63,10 @@ message Redis {
   string addr     = 1;  // redis 地址，如 10.211.55.5:6379
   string password = 2;  // redis 密码
   int32  db       = 3;  // redis DB 号
-  reserved 4 to 99;
+  int32  poolSize    = 4;  // 连接池大小，默认 20
+  int32  minIdleConns = 5;  // 最小空闲连接数，默认 5
+  google.protobuf.Duration dialTimeout   = 6;  // 连接超时，默认 3s
+  google.protobuf.Duration readTimeout   = 7;  // 读超时，默认 5s
+  google.protobuf.Duration writeTimeout  = 8;  // 写超时，默认 5s
+  int32  maxRetries  = 9;  // 最大重试次数，默认 3
 }

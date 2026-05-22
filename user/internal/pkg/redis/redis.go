@@ -11,8 +11,11 @@ import (
 	pkgretry "github.com/storemicro/pkg/retry"
 )
 
-// #5: Redis key 前缀常量，Lua 脚本中硬编码的前缀必须与此保持一致
-const tokenKeyPrefix = "storemicro:user:token:"
+// #12 fix: Redis key 前缀常量（统一维护，Lua 脚本通过 ARGV 传入，不再硬编码）
+const (
+	tokenKeyPrefix     = "storemicro:user:token:"
+	userTokenMapPrefix = "storemicro:user:token_map:"
+)
 
 // hashToken 计算 token 的 SHA-256 哈希，用于 Redis key 存储（防止 Redis 被攻破泄露原始 token）
 func hashToken(token string) string {
@@ -56,15 +59,15 @@ func NewRedis(addr, password string, db int) (*Redis, error) {
 
 // setTokenScript Lua 脚本原子化 token 操作，解决并发登录竞态条件
 // KEYS[1] = token正向映射 key (sha256), KEYS[2] = user_token反向映射 key
-// ARGV[1] = sha256(新token), ARGV[2] = userID, ARGV[3] = 过期秒数
+// ARGV[1] = sha256(新token), ARGV[2] = userID, ARGV[3] = 过期秒数, ARGV[4] = token key 前缀
 //
 // 流程：读取旧hash → 删除旧正向映射 → 写新正向映射 → 写反向映射（存 hash）
 // 所有操作在 Lua 中原子执行，避免并发登录时 token 被偷
-// 注意：Lua 脚本中 storemicro:user:token: 前缀必须与 Go 代码中 tokenKeyPrefix 保持一致
 var setTokenScript = redis.NewScript(`
+local prefix = ARGV[4]
 local oldHash = redis.call('GET', KEYS[2])
 if oldHash and oldHash ~= '' then
-	redis.call('DEL', 'storemicro:user:token:' .. oldHash)
+	redis.call('DEL', prefix .. oldHash)
 end
 redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
 redis.call('SET', KEYS[2], ARGV[1], 'EX', ARGV[3])
@@ -88,12 +91,13 @@ return 1
 
 // invalidateTokenScript Lua 脚本原子化 token 失效操作（用户删除/禁用时使用）
 // KEYS[1] = user_token反向映射 key
+// ARGV[1] = token key 前缀
 // 流程：读取当前hash → 删除正向映射 → 删除反向映射
-// 注意：Lua 脚本中 storemicro:user:token: 前缀必须与 Go 代码中 tokenKeyPrefix 保持一致
 var invalidateTokenScript = redis.NewScript(`
+local prefix = ARGV[1]
 local tokenHash = redis.call('GET', KEYS[1])
 if tokenHash and tokenHash ~= '' then
-	redis.call('DEL', 'storemicro:user:token:' .. tokenHash)
+	redis.call('DEL', prefix .. tokenHash)
 end
 redis.call('DEL', KEYS[1])
 return 1
@@ -105,10 +109,10 @@ return 1
 func (r *Redis) SetToken(ctx context.Context, token string, userID int64, expire time.Duration) error {
 	tokenHash := hashToken(token)
 	tokenKey := tokenKeyPrefix + tokenHash
-	userTokenKey := fmt.Sprintf("storemicro:user:token_map:%d", userID)
+	userTokenKey := userTokenMapPrefix + fmt.Sprintf("%d", userID)
 	expireSec := int64(expire.Seconds())
 
-	_, err := setTokenScript.Run(ctx, r.client, []string{tokenKey, userTokenKey}, tokenHash, userID, expireSec).Result()
+	_, err := setTokenScript.Run(ctx, r.client, []string{tokenKey, userTokenKey}, tokenHash, userID, expireSec, tokenKeyPrefix).Result()
 	return err
 }
 
@@ -130,7 +134,7 @@ func (r *Redis) GetUserIDByToken(ctx context.Context, token string) (int64, erro
 func (r *Redis) DeleteToken(ctx context.Context, token string, userID int64) error {
 	tokenHash := hashToken(token)
 	tokenKey := tokenKeyPrefix + tokenHash
-	userTokenKey := fmt.Sprintf("storemicro:user:token_map:%d", userID)
+	userTokenKey := userTokenMapPrefix + fmt.Sprintf("%d", userID)
 
 	_, err := deleteTokenScript.Run(ctx, r.client, []string{tokenKey, userTokenKey}, tokenHash).Result()
 	return err
@@ -144,9 +148,9 @@ func (r *Redis) Ping(ctx context.Context) error {
 // InvalidateUserTokens 删除用户所有活跃 token（用户删除/禁用时使用）
 // 通过反向映射 user_token_map:{userID} 找到当前 token hash，然后原子删除双向映射
 func (r *Redis) InvalidateUserTokens(ctx context.Context, userID int64) error {
-	userTokenKey := fmt.Sprintf("storemicro:user:token_map:%d", userID)
+	userTokenKey := userTokenMapPrefix + fmt.Sprintf("%d", userID)
 
-	_, err := invalidateTokenScript.Run(ctx, r.client, []string{userTokenKey}).Result()
+	_, err := invalidateTokenScript.Run(ctx, r.client, []string{userTokenKey}, tokenKeyPrefix).Result()
 	return err
 }
 

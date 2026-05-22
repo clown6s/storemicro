@@ -12,20 +12,17 @@ message Bootstrap {
   Logger   logger   = 3;
   Registry registry = 4;
   Tracing  tracing  = 5;
-  reserved 6 to 99;
 }
 
 message Tracing {
   string endpoint   = 1;
-  double sample_rate = 2;
-  reserved 3 to 99;
+  double sampleRate = 2;
 }
 
 message Server {
   message GRPC {
     string addr = 1;
     google.protobuf.Duration timeout = 2;
-    reserved 3 to 99;
   }
   GRPC grpc = 1;
 }
@@ -34,25 +31,22 @@ message Data {
   message Database {
     string  driver          = 1;
     string  source          = 2;
-    int64   max_open_conns  = 3;
-    int64   max_idle_conns  = 4;
-    int64   conn_max_lifetime = 5;
-    int64   conn_max_idle_time = 6; // 空闲连接最大存活时间（秒），默认 conn_max_lifetime/2
-    reserved 7 to 99;
+    int64   maxOpenConns    = 3;
+    int64   maxIdleConns    = 4;
+    int64   connMaxLifetime = 5;
+    int64   connMaxIdleTime = 6; // 空闲连接最大存活时间（秒），默认 connMaxLifetime/2
   }
   Database database = 1;
 }
 
 message Logger {
   string level = 1;
-  reserved 2 to 99;
 }
 
 message Registry {
   message Etcd {
     repeated string endpoints = 1;
     int64 timeout = 2;
-    reserved 3 to 99;
   }
   Etcd etcd = 1;
 }

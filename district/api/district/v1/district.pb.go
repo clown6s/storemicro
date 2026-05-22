@@ -224,13 +224,13 @@ var File_district_proto protoreflect.FileDescriptor
 
 const file_district_proto_rawDesc = "" +
 	"\n" +
-	"\x0edistrict.proto\x12\x0fapi.district.v1\x1a\x1cgoogle/api/annotations.proto\"2\n" +
+	"\x0edistrict.proto\x12\x0fapi.district.v1\x1a\x1cgoogle/api/annotations.proto\",\n" +
 	"\x12GetProvinceTreeReq\x12\x16\n" +
-	"\x06adCode\x18\x01 \x01(\tR\x06adCodeJ\x04\b\x02\x10d\"|\n" +
+	"\x06adCode\x18\x01 \x01(\tR\x06adCode\"v\n" +
 	"\x13GetProvinceTreeResp\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\rR\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x121\n" +
-	"\x04data\x18\x03 \x03(\v2\x1d.api.district.v1.DistrictTreeR\x04dataJ\x04\b\x04\x10d\"\xdd\x01\n" +
+	"\x04data\x18\x03 \x03(\v2\x1d.api.district.v1.DistrictTreeR\x04data\"\xd7\x01\n" +
 	"\fDistrictTree\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\x03R\x02id\x12\"\n" +
 	"\fparentAdCode\x18\x02 \x01(\tR\fparentAdCode\x12\x16\n" +
@@ -238,7 +238,7 @@ const file_district_proto_rawDesc = "" +
 	"\x04name\x18\x04 \x01(\tR\x04name\x12\x14\n" +
 	"\x05level\x18\x05 \x01(\tR\x05level\x12\x16\n" +
 	"\x06center\x18\x06 \x01(\tR\x06center\x129\n" +
-	"\bchildren\x18\a \x03(\v2\x1d.api.district.v1.DistrictTreeR\bchildrenJ\x04\b\b\x10d2\x90\x01\n" +
+	"\bchildren\x18\a \x03(\v2\x1d.api.district.v1.DistrictTreeR\bchildren2\x90\x01\n" +
 	"\bDistrict\x12\x83\x01\n" +
 	"\x0fGetProvinceTree\x12#.api.district.v1.GetProvinceTreeReq\x1a$.api.district.v1.GetProvinceTreeResp\"%\x82\xd3\xe4\x93\x02\x1f\x12\x1d/api/v1/district/provinceTreeB%Z#district/api/district/v1;districtv1b\x06proto3"
 

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 	"sync"
+	"time"
 
 	"user/internal/pkg/jwt"
 	"user/internal/pkg/redis"
@@ -63,7 +64,7 @@ var (
 	hasUpper    = regexp.MustCompile(`[A-Z]`)
 	hasLower    = regexp.MustCompile(`[a-z]`)
 	hasDigit    = regexp.MustCompile(`\d`)
-	hasSpecial  = regexp.MustCompile(`[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>/?~]`)
+	hasSpecial  = regexp.MustCompile(`[^a-zA-Z0-9]`) // #16 fix: 匹配任意非字母数字字符（含反引号、空格等）
 )
 
 // [C3] 用于 timing-safe login 的 dummy bcrypt hash（cost=10, 随机 salt）
@@ -240,8 +241,12 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			// [C3] timing-safe: 用户不存在时对 dummy hash 做 bcrypt 比较，防止通过响应时间差异枚举手机号
+			// #15 fix: h == nil 时用 time.Sleep 模拟 bcrypt 耗时，保持 timing-safe
 			if h := getDummyHash(); h != nil {
 				_ = bcrypt.CompareHashAndPassword(h, []byte(password))
+			} else {
+				// dummy hash 生成失败（3次重试后），用 sleep 模拟 bcrypt.DefaultCost 耗时（约 100ms）
+				time.Sleep(100 * time.Millisecond)
 			}
 			return "", nil, ErrWrongCredentials
 		}
@@ -249,6 +254,8 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 		zap.L().Error("login failed: db error", zap.String("phone", pkgstr.MaskPhone(phone)), zap.Error(err))
 		return "", nil, fmt.Errorf("internal error")
 	}
+	// #14 fix: GetByPhone 返回后立即 defer 清除密码 hash，确保所有错误路径都不会泄露
+	defer user.ClearPassword()
 
 	// 验证密码
 	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(password)); err != nil {
@@ -271,7 +278,6 @@ func (uc *UserUsecase) Login(ctx context.Context, phone, password string) (strin
 	}
 
 	zap.L().Info("user logged in", zap.Int64("id", user.ID), zap.String("phone", pkgstr.MaskPhone(phone)))
-	user.ClearPassword() // 防御性清除：不在 biz 层之外传播密码 hash
 	return token, user, nil
 }
 

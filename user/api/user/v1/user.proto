@@ -63,7 +63,6 @@ message GetUserResp {
   uint32 code = 1;
   string message = 2;
   UserInfo data = 3;
-  reserved 4 to 99;
 }
 
 // 用户实体（不含密码）
@@ -78,7 +77,6 @@ message UserInfo {
   string createTime  = 8;  // TODO: 迁移为 google.protobuf.Timestamp
   string updateTime  = 9;  // TODO: 迁移为 google.protobuf.Timestamp
   string remark      = 10;
-  reserved 11 to 99;
 }
 
 // 注册
@@ -91,20 +89,17 @@ message RegisterReq {
   int32  gender     = 6;
   int32  age        = 7;
   string remark     = 8;
-  reserved 9 to 99;
 }
 
 message RegisterResp {
   uint32 code = 1;
   string message = 2;
-  reserved 3 to 99;
 }
 
 // 登录
 message LoginReq {
   string phone    = 1;
   string password = 2;
-  reserved 3 to 99;
 }
 
 message LoginResp {
@@ -112,7 +107,6 @@ message LoginResp {
   string message = 2;
   string token   = 3;
   UserInfo data  = 4;
-  reserved 5 to 99;
 }
 
 // 用户列表（分页）
@@ -125,7 +119,6 @@ message ListUsersReq {
   string sortBy    = 5;
   // 排序方向："asc" 或 "desc"，默认 "desc"
   string sortOrder = 6;
-  reserved 7 to 99;
 }
 
 message ListUsersResp {
@@ -135,18 +128,14 @@ message ListUsersResp {
   int32          page      = 4;
   int32          pageSize = 5;
   repeated UserInfo data   = 6;
-  reserved 7 to 99;
 }
 
 // 登出（token 从 Authorization header 获取，消息体无需传 token）
-message LogoutReq {
-  reserved 1 to 99;  // token 字段已移除，改从 header 获取
-}
+message LogoutReq {}
 
 message LogoutResp {
   uint32 code    = 1;
   string message = 2;
-  reserved 3 to 99;
 }
 
 // 更新用户
@@ -160,23 +149,19 @@ message UpdateUserReq {
   string remark    = 7;
   // 标记需要强制清空的字段名（如 "email","remark"），不填则空值不更新
   repeated string forceClearFields = 8;
-  reserved 9 to 99;
 }
 
 message UpdateUserResp {
   uint32 code    = 1;
   string message = 2;
-  reserved 3 to 99;
 }
 
 // 删除用户
 message DeleteUserReq {
   int64 id = 1;
-  reserved 2 to 99;
 }
 
 message DeleteUserResp {
   uint32 code    = 1;
   string message = 2;
-  reserved 3 to 99;
 }

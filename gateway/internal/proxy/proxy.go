@@ -22,6 +22,7 @@ import (
 	_ "google.golang.org/grpc/health"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/encoding/protojson"
 
 	"gateway/internal/appconfig"
 	"gateway/internal/auth"
@@ -152,6 +153,14 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 	}
 
 	p.mux = runtime.NewServeMux(
+		runtime.WithMarshalerOption(runtime.MIMEWildcard, &runtime.JSONPb{
+			MarshalOptions: protojson.MarshalOptions{
+				UseProtoNames: false, // JSON 输出使用 camelCase（如 pageSize）而非 snake_case（如 page_size）
+			},
+			UnmarshalOptions: protojson.UnmarshalOptions{
+				DiscardUnknown: false,
+			},
+		}),
 		runtime.WithErrorHandler(customErrorHandler),
 		runtime.WithRoutingErrorHandler(customRoutingErrorHandler),
 	)

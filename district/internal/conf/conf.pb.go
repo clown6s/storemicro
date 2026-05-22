@@ -101,7 +101,7 @@ func (x *Bootstrap) GetTracing() *Tracing {
 type Tracing struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Endpoint      string                 `protobuf:"bytes,1,opt,name=endpoint,proto3" json:"endpoint,omitempty"`
-	SampleRate    float64                `protobuf:"fixed64,2,opt,name=sample_rate,json=sampleRate,proto3" json:"sample_rate,omitempty"`
+	SampleRate    float64                `protobuf:"fixed64,2,opt,name=sampleRate,proto3" json:"sampleRate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -382,10 +382,10 @@ type Data_Database struct {
 	state           protoimpl.MessageState `protogen:"open.v1"`
 	Driver          string                 `protobuf:"bytes,1,opt,name=driver,proto3" json:"driver,omitempty"`
 	Source          string                 `protobuf:"bytes,2,opt,name=source,proto3" json:"source,omitempty"`
-	MaxOpenConns    int64                  `protobuf:"varint,3,opt,name=max_open_conns,json=maxOpenConns,proto3" json:"max_open_conns,omitempty"`
-	MaxIdleConns    int64                  `protobuf:"varint,4,opt,name=max_idle_conns,json=maxIdleConns,proto3" json:"max_idle_conns,omitempty"`
-	ConnMaxLifetime int64                  `protobuf:"varint,5,opt,name=conn_max_lifetime,json=connMaxLifetime,proto3" json:"conn_max_lifetime,omitempty"`
-	ConnMaxIdleTime int64                  `protobuf:"varint,6,opt,name=conn_max_idle_time,json=connMaxIdleTime,proto3" json:"conn_max_idle_time,omitempty"` // 空闲连接最大存活时间（秒），默认 conn_max_lifetime/2
+	MaxOpenConns    int64                  `protobuf:"varint,3,opt,name=maxOpenConns,proto3" json:"maxOpenConns,omitempty"`
+	MaxIdleConns    int64                  `protobuf:"varint,4,opt,name=maxIdleConns,proto3" json:"maxIdleConns,omitempty"`
+	ConnMaxLifetime int64                  `protobuf:"varint,5,opt,name=connMaxLifetime,proto3" json:"connMaxLifetime,omitempty"`
+	ConnMaxIdleTime int64                  `protobuf:"varint,6,opt,name=connMaxIdleTime,proto3" json:"connMaxIdleTime,omitempty"` // 空闲连接最大存活时间（秒），默认 connMaxLifetime/2
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
@@ -519,39 +519,40 @@ var File_conf_proto protoreflect.FileDescriptor
 const file_conf_proto_rawDesc = "" +
 	"\n" +
 	"\n" +
-	"conf.proto\x12\x04conf\x1a\x1egoogle/protobuf/duration.proto\"\xd2\x01\n" +
+	"conf.proto\x12\x04conf\x1a\x1egoogle/protobuf/duration.proto\"\xcc\x01\n" +
 	"\tBootstrap\x12$\n" +
 	"\x06server\x18\x01 \x01(\v2\f.conf.ServerR\x06server\x12\x1e\n" +
 	"\x04data\x18\x02 \x01(\v2\n" +
 	".conf.DataR\x04data\x12$\n" +
 	"\x06logger\x18\x03 \x01(\v2\f.conf.LoggerR\x06logger\x12*\n" +
 	"\bregistry\x18\x04 \x01(\v2\x0e.conf.RegistryR\bregistry\x12'\n" +
-	"\atracing\x18\x05 \x01(\v2\r.conf.TracingR\atracingJ\x04\b\x06\x10d\"L\n" +
+	"\atracing\x18\x05 \x01(\v2\r.conf.TracingR\atracing\"E\n" +
 	"\aTracing\x12\x1a\n" +
-	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12\x1f\n" +
-	"\vsample_rate\x18\x02 \x01(\x01R\n" +
-	"sampleRateJ\x04\b\x03\x10d\"\x86\x01\n" +
+	"\bendpoint\x18\x01 \x01(\tR\bendpoint\x12\x1e\n" +
+	"\n" +
+	"sampleRate\x18\x02 \x01(\x01R\n" +
+	"sampleRate\"\x80\x01\n" +
 	"\x06Server\x12%\n" +
-	"\x04grpc\x18\x01 \x01(\v2\x11.conf.Server.GRPCR\x04grpc\x1aU\n" +
+	"\x04grpc\x18\x01 \x01(\v2\x11.conf.Server.GRPCR\x04grpc\x1aO\n" +
 	"\x04GRPC\x12\x12\n" +
 	"\x04addr\x18\x01 \x01(\tR\x04addr\x123\n" +
-	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeoutJ\x04\b\x03\x10d\"\x9f\x02\n" +
+	"\atimeout\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\atimeout\"\x90\x02\n" +
 	"\x04Data\x12/\n" +
-	"\bdatabase\x18\x01 \x01(\v2\x13.conf.Data.DatabaseR\bdatabase\x1a\xe5\x01\n" +
+	"\bdatabase\x18\x01 \x01(\v2\x13.conf.Data.DatabaseR\bdatabase\x1a\xd6\x01\n" +
 	"\bDatabase\x12\x16\n" +
 	"\x06driver\x18\x01 \x01(\tR\x06driver\x12\x16\n" +
-	"\x06source\x18\x02 \x01(\tR\x06source\x12$\n" +
-	"\x0emax_open_conns\x18\x03 \x01(\x03R\fmaxOpenConns\x12$\n" +
-	"\x0emax_idle_conns\x18\x04 \x01(\x03R\fmaxIdleConns\x12*\n" +
-	"\x11conn_max_lifetime\x18\x05 \x01(\x03R\x0fconnMaxLifetime\x12+\n" +
-	"\x12conn_max_idle_time\x18\x06 \x01(\x03R\x0fconnMaxIdleTimeJ\x04\b\a\x10d\"$\n" +
+	"\x06source\x18\x02 \x01(\tR\x06source\x12\"\n" +
+	"\fmaxOpenConns\x18\x03 \x01(\x03R\fmaxOpenConns\x12\"\n" +
+	"\fmaxIdleConns\x18\x04 \x01(\x03R\fmaxIdleConns\x12(\n" +
+	"\x0fconnMaxLifetime\x18\x05 \x01(\x03R\x0fconnMaxLifetime\x12(\n" +
+	"\x0fconnMaxIdleTime\x18\x06 \x01(\x03R\x0fconnMaxIdleTime\"\x1e\n" +
 	"\x06Logger\x12\x14\n" +
-	"\x05level\x18\x01 \x01(\tR\x05levelJ\x04\b\x02\x10d\"y\n" +
+	"\x05level\x18\x01 \x01(\tR\x05level\"s\n" +
 	"\bRegistry\x12'\n" +
-	"\x04etcd\x18\x01 \x01(\v2\x13.conf.Registry.EtcdR\x04etcd\x1aD\n" +
+	"\x04etcd\x18\x01 \x01(\v2\x13.conf.Registry.EtcdR\x04etcd\x1a>\n" +
 	"\x04Etcd\x12\x1c\n" +
 	"\tendpoints\x18\x01 \x03(\tR\tendpoints\x12\x18\n" +
-	"\atimeout\x18\x02 \x01(\x03R\atimeoutJ\x04\b\x03\x10dB\x1dZ\x1bdistrict/internal/conf;confb\x06proto3"
+	"\atimeout\x18\x02 \x01(\x03R\atimeoutB\x1dZ\x1bdistrict/internal/conf;confb\x06proto3"
 
 var (
 	file_conf_proto_rawDescOnce sync.Once

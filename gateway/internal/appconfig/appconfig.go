@@ -22,18 +22,18 @@ type AppConfig struct {
 	Redis           RedisConfig      `yaml:"redis"`
 	Log             LogConfig        `yaml:"logger"`
 	Tracing         TracingConfig    `yaml:"tracing"`
-	MetricsPassword string           `yaml:"metrics_password"`
+	MetricsPassword string           `yaml:"metricsPassword"`
 }
 
 // GrpcClientConfig gRPC 出站客户端配置
 type GrpcClientConfig struct {
-	LoadBalancingPolicy string               `yaml:"load_balancing_policy"` // round_robin | pick_first
-	HealthCheck         HealthCheckConfig    `yaml:"health_check"`
+	LoadBalancingPolicy string               `yaml:"loadBalancingPolicy"` // round_robin | pick_first
+	HealthCheck         HealthCheckConfig    `yaml:"healthCheck"`
 	Retry               RetryConfig          `yaml:"retry"`
-	CircuitBreaker      CircuitBreakerConfig `yaml:"circuit_breaker"`
-	MaxRecvMsgSize      int                  `yaml:"max_recv_msg_size"` // MB
-	MaxSendMsgSize      int                  `yaml:"max_send_msg_size"` // MB
-	RequestTimeout      time.Duration        `yaml:"request_timeout"`   // 单次 gRPC 请求超时，默认 30s
+	CircuitBreaker      CircuitBreakerConfig `yaml:"circuitBreaker"`
+	MaxRecvMsgSize      int                  `yaml:"maxRecvMsgSize"` // MB
+	MaxSendMsgSize      int                  `yaml:"maxSendMsgSize"` // MB
+	RequestTimeout      time.Duration        `yaml:"requestTimeout"` // 单次 gRPC 请求超时，默认 30s
 }
 
 // HealthCheckConfig gRPC 客户端健康检查配置
@@ -45,42 +45,42 @@ type HealthCheckConfig struct {
 
 // RetryConfig gRPC 方法重试策略配置
 type RetryConfig struct {
-	MaxAttempts       int           `yaml:"max_attempts"`       // 最大重试次数（含首次）
-	InitialBackoff    time.Duration `yaml:"initial_backoff"`    // 首次退避
-	MaxBackoff        time.Duration `yaml:"max_backoff"`        // 最大退避
-	BackoffMultiplier float64       `yaml:"backoff_multiplier"` // 退避倍数
-	RetryableCodes    []string      `yaml:"retryable_codes"`    // 可重试的 gRPC 状态码
+	MaxAttempts       int           `yaml:"maxAttempts"`       // 最大重试次数（含首次）
+	InitialBackoff    time.Duration `yaml:"initialBackoff"`    // 首次退避
+	MaxBackoff        time.Duration `yaml:"maxBackoff"`        // 最大退避
+	BackoffMultiplier float64       `yaml:"backoffMultiplier"` // 退避倍数
+	RetryableCodes    []string      `yaml:"retryableCodes"`    // 可重试的 gRPC 状态码
 }
 
 // CircuitBreakerConfig 熔断器配置
 type CircuitBreakerConfig struct {
-	MaxRequests  int     `yaml:"max_requests"`  // 半开状态最大并发
-	Interval     int     `yaml:"interval"`      // 统计周期（秒）
-	Timeout      int     `yaml:"timeout"`       // 熔断时长（秒）
-	FailureRatio float64 `yaml:"failure_ratio"` // 触发熔断的失败率阈值
-	MinRequests  int     `yaml:"min_requests"`  // 最少请求数（低于此值不触发熔断）
+	MaxRequests  int     `yaml:"maxRequests"`  // 半开状态最大并发
+	Interval     int     `yaml:"interval"`     // 统计周期（秒）
+	Timeout      int     `yaml:"timeout"`      // 熔断时长（秒）
+	FailureRatio float64 `yaml:"failureRatio"` // 触发熔断的失败率阈值
+	MinRequests  int     `yaml:"minRequests"`  // 最少请求数（低于此值不触发熔断）
 }
 
 // TracingConfig 链路追踪配置
 type TracingConfig struct {
 	Endpoint   string  `yaml:"endpoint"`
-	SampleRate float64 `yaml:"sample_rate"`
+	SampleRate float64 `yaml:"sampleRate"`
 }
 
 // ServerConfig 服务配置
 type ServerConfig struct {
 	Addr           string        `yaml:"addr"`
-	AllowOrigins   []string      `yaml:"allow_origins"`
-	TrustedProxies []string      `yaml:"trusted_proxies"`
-	ReadTimeout    time.Duration `yaml:"read_timeout"`  // HTTP 读超时，默认 30s
-	WriteTimeout   time.Duration `yaml:"write_timeout"` // HTTP 写超时，默认 60s
-	IdleTimeout    time.Duration `yaml:"idle_timeout"`  // HTTP 空闲超时，默认 120s
+	AllowOrigins   []string      `yaml:"allowOrigins"`
+	TrustedProxies []string      `yaml:"trustedProxies"`
+	ReadTimeout    time.Duration `yaml:"readTimeout"`  // HTTP 读超时，默认 30s
+	WriteTimeout   time.Duration `yaml:"writeTimeout"` // HTTP 写超时，默认 60s
+	IdleTimeout    time.Duration `yaml:"idleTimeout"`  // HTTP 空闲超时，默认 120s
 }
 
 // EtcdConfig etcd 配置
 type EtcdConfig struct {
 	Endpoints   []string      `yaml:"endpoints"`
-	DialTimeout time.Duration `yaml:"dial_timeout"`
+	DialTimeout time.Duration `yaml:"dialTimeout"`
 	Username    string        `yaml:"username"` // etcd 认证用户名（可选）
 	Password    string        `yaml:"password"` // etcd 认证密码（可选）
 }
@@ -88,12 +88,12 @@ type EtcdConfig struct {
 // LogConfig 日志配置
 type LogConfig struct {
 	Level      string `yaml:"level"`
-	Mode       string `yaml:"mode"`        // dev (console) | prod (json)，默认 dev
-	Filepath   string `yaml:"filepath"`    // 日志文件路径，空 = 仅 stdout
-	MaxSize    int    `yaml:"max_size"`    // 单文件最大 MB，默认 100
-	MaxBackups int    `yaml:"max_backups"` // 保留旧文件数，默认 10
-	MaxAge     int    `yaml:"max_age"`     // 保留天数，默认 30
-	Compress   bool   `yaml:"compress"`    // 是否 gzip 压缩旧文件
+	Mode       string `yaml:"mode"`       // dev (console) | prod (json)，默认 dev
+	Filepath   string `yaml:"filepath"`   // 日志文件路径，空 = 仅 stdout
+	MaxSize    int    `yaml:"maxSize"`    // 单文件最大 MB，默认 100
+	MaxBackups int    `yaml:"maxBackups"` // 保留旧文件数，默认 10
+	MaxAge     int    `yaml:"maxAge"`     // 保留天数，默认 30
+	Compress   bool   `yaml:"compress"`   // 是否 gzip 压缩旧文件
 }
 
 // JwtConfig JWT 配置
@@ -221,7 +221,7 @@ func Load(path string) (*AppConfig, error) {
 
 	// 校验链路追踪 SampleRate 范围 (0.0-1.0)
 	if cfg.Tracing.SampleRate < 0 || cfg.Tracing.SampleRate > 1 {
-		return nil, fmt.Errorf("tracing.sample_rate must be between 0.0 and 1.0, got %.2f", cfg.Tracing.SampleRate)
+		return nil, fmt.Errorf("tracing.sampleRate must be between 0.0 and 1.0, got %.2f", cfg.Tracing.SampleRate)
 	}
 
 	if cfg.GrpcClient.RequestTimeout <= 0 {
@@ -243,30 +243,30 @@ func validateGrpcClient(c *GrpcClientConfig) error {
 	case "round_robin", "pick_first":
 		// 合法值
 	default:
-		return fmt.Errorf("grpc_client.load_balancing_policy must be 'round_robin' or 'pick_first', got %q", c.LoadBalancingPolicy)
+		return fmt.Errorf("grpc_client.loadBalancingPolicy must be 'round_robin' or 'pick_first', got %q", c.LoadBalancingPolicy)
 	}
 
 	// MaxAttempts 范围校验（1=不重试，2=重试1次，上限10防止重试风暴）
 	if c.Retry.MaxAttempts > 10 {
-		return fmt.Errorf("grpc_client.retry.max_attempts must be <= 10, got %d", c.Retry.MaxAttempts)
+		return fmt.Errorf("grpc_client.retry.maxAttempts must be <= 10, got %d", c.Retry.MaxAttempts)
 	}
 
 	// #17: BackoffMultiplier 必须大于 0
 	if c.Retry.BackoffMultiplier <= 0 {
-		return fmt.Errorf("grpc_client.retry.backoff_multiplier must be > 0, got %.2f", c.Retry.BackoffMultiplier)
+		return fmt.Errorf("grpc_client.retry.backoffMultiplier must be > 0, got %.2f", c.Retry.BackoffMultiplier)
 	}
 
 	// #17: InitialBackoff 不能超过 MaxBackoff
 	if c.Retry.InitialBackoff > c.Retry.MaxBackoff {
-		return fmt.Errorf("grpc_client.retry.initial_backoff (%v) must not exceed max_backoff (%v)", c.Retry.InitialBackoff, c.Retry.MaxBackoff)
+		return fmt.Errorf("grpc_client.retry.initialBackoff (%v) must not exceed maxBackoff (%v)", c.Retry.InitialBackoff, c.Retry.MaxBackoff)
 	}
 
 	// #7: MaxRecvMsgSize / MaxSendMsgSize 必须在合理范围 (1-100 MB)
 	if c.MaxRecvMsgSize <= 0 || c.MaxRecvMsgSize > 100 {
-		return fmt.Errorf("grpc_client.max_recv_msg_size must be between 1 and 100 MB, got %d", c.MaxRecvMsgSize)
+		return fmt.Errorf("grpc_client.maxRecvMsgSize must be between 1 and 100 MB, got %d", c.MaxRecvMsgSize)
 	}
 	if c.MaxSendMsgSize <= 0 || c.MaxSendMsgSize > 100 {
-		return fmt.Errorf("grpc_client.max_send_msg_size must be between 1 and 100 MB, got %d", c.MaxSendMsgSize)
+		return fmt.Errorf("grpc_client.maxSendMsgSize must be between 1 and 100 MB, got %d", c.MaxSendMsgSize)
 	}
 
 	// 校验 RetryableCodes 只包含合法的 gRPC 状态码名
@@ -280,19 +280,19 @@ func validateGrpcClient(c *GrpcClientConfig) error {
 	}
 	for _, code := range c.Retry.RetryableCodes {
 		if !validCodes[code] {
-			return fmt.Errorf("grpc_client.retry.retryable_codes contains invalid gRPC code: %q", code)
+			return fmt.Errorf("grpc_client.retry.retryableCodes contains invalid gRPC code: %q", code)
 		}
 	}
 
 	// CircuitBreaker 配置校验
 	if c.CircuitBreaker.FailureRatio < 0 || c.CircuitBreaker.FailureRatio > 1 {
-		return fmt.Errorf("grpc_client.circuit_breaker.failure_ratio must be between 0.0 and 1.0, got %.2f", c.CircuitBreaker.FailureRatio)
+		return fmt.Errorf("grpc_client.circuitBreaker.failureRatio must be between 0.0 and 1.0, got %.2f", c.CircuitBreaker.FailureRatio)
 	}
 	if c.CircuitBreaker.MaxRequests < 1 {
-		return fmt.Errorf("grpc_client.circuit_breaker.max_requests must be >= 1, got %d", c.CircuitBreaker.MaxRequests)
+		return fmt.Errorf("grpc_client.circuitBreaker.maxRequests must be >= 1, got %d", c.CircuitBreaker.MaxRequests)
 	}
 	if c.CircuitBreaker.MinRequests < 0 {
-		return fmt.Errorf("grpc_client.circuit_breaker.min_requests must be >= 0, got %d", c.CircuitBreaker.MinRequests)
+		return fmt.Errorf("grpc_client.circuitBreaker.minRequests must be >= 0, got %d", c.CircuitBreaker.MinRequests)
 	}
 
 	return nil

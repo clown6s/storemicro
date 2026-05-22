@@ -7,9 +7,9 @@ data:
   database:
     driver: mysql
     source: "root:admin@zzp@tcp(10.211.55.5:3306)/store_micro?charset=utf8mb4&parseTime=true&loc=Local"
-    max_open_conns: 100
-    max_idle_conns: 25
-    conn_max_lifetime: 3600
+    maxOpenConns: 100
+    maxIdleConns: 25
+    connMaxLifetime: 3600
 
 logger:
   level: info
@@ -24,7 +24,7 @@ registry:
 # JWT 配置（⚠️ 生产环境必须通过环境变量 JWT_SECRET 注入）
 jwt:
   secret: '4*8#5@7!^i(nj_9876555=+s4x3v9g12m`js0lmb8(-=+-_!`~||\]}mb<.?,.>>,mncukdkieijufonicndknveufw3io'
-  expire_hours: 24
+  expireHours: 24
 
 # Redis 配置（⚠️ 生产环境必须通过环境变量注入密码）
 redis:
@@ -35,4 +35,4 @@ redis:
 # 链路追踪
 tracing:
   endpoint: ""
-  sample_rate: 0.1
+  sampleRate: 0.1

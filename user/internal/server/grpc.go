@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
 	sgrpc "google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 
@@ -19,10 +20,11 @@ import (
 	"github.com/go-kratos/kratos/v2/middleware/logging"
 	"github.com/go-kratos/kratos/v2/middleware/recovery"
 	"github.com/go-kratos/kratos/v2/middleware/tracing"
+	"github.com/go-kratos/kratos/v2/transport"
 	kratosgrpc "github.com/go-kratos/kratos/v2/transport/grpc"
 	"github.com/google/wire"
+	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 )
@@ -36,26 +38,51 @@ const (
 	defaultMaxSendMsgSize = 16 << 20 // 16MB
 )
 
-// #34: perIPRateLimiter 基于内存的按 IP 速率限制（兜底防御，主防御在网关层）
+// #34: perIPRateLimiter 基于标准令牌桶的按 IP 速率限制（兜底防御，主防御在网关层）
 type perIPRateLimiter struct {
-	mu       sync.Mutex
-	limiters map[string]*tokenBucket
-	rate     int           // 每秒允许的请求数
-	burst    int           // 突发容量
-	window   time.Duration // 滑动窗口
+	mu          sync.Mutex
+	limiters    map[string]*ipEntry
+	r           rate.Limit // 每秒产生的令牌数
+	burst       int        // 令牌桶容量
+	lastCleanup time.Time
 }
 
-type tokenBucket struct {
-	count    int
-	lastTime time.Time
+// ipEntry 封装限流器和最后使用时间，用于定期清理
+type ipEntry struct {
+	limiter  *rate.Limiter
+	lastUsed time.Time
 }
 
-func newPerIPRateLimiter(rate, burst int, window time.Duration) *perIPRateLimiter {
-	return &perIPRateLimiter{
-		limiters: make(map[string]*tokenBucket),
-		rate:     rate,
-		burst:    burst,
-		window:   window,
+func newPerIPRateLimiter(rps int, burst int, cleanupInterval time.Duration) *perIPRateLimiter {
+	rl := &perIPRateLimiter{
+		limiters:    make(map[string]*ipEntry),
+		r:           rate.Limit(rps),
+		burst:       burst,
+		lastCleanup: time.Now(),
+	}
+	// 启动后台 goroutine 定期清理过期 IP 条目，防止 map 无限增长导致 OOM
+	go rl.cleanupLoop(cleanupInterval * 2) // 清理周期 = 窗口 × 2，确保不误删活跃 IP
+	return rl
+}
+
+// cleanupLoop 定期清理超过 cleanupInterval 未访问的 IP 条目
+func (rl *perIPRateLimiter) cleanupLoop(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for range ticker.C {
+		rl.mu.Lock()
+		now := time.Now()
+		expired := 0
+		for ip, entry := range rl.limiters {
+			if now.Sub(entry.lastUsed) > interval {
+				delete(rl.limiters, ip)
+				expired++
+			}
+		}
+		rl.mu.Unlock()
+		if expired > 0 {
+			zap.L().Debug("rate limiter: cleaned up expired IP entries", zap.Int("count", expired))
+		}
 	}
 }
 
@@ -64,27 +91,30 @@ func (rl *perIPRateLimiter) allow(ip string) bool {
 	defer rl.mu.Unlock()
 	now := time.Now()
 
-	bucket, ok := rl.limiters[ip]
-	if !ok || now.Sub(bucket.lastTime) > rl.window {
-		rl.limiters[ip] = &tokenBucket{count: 1, lastTime: now}
+	entry, ok := rl.limiters[ip]
+	if !ok {
+		rl.limiters[ip] = &ipEntry{
+			limiter:  rate.NewLimiter(rl.r, rl.burst),
+			lastUsed: now,
+		}
 		return true
 	}
-	bucket.count++
-	bucket.lastTime = now
-	return bucket.count <= rl.burst
+	entry.lastUsed = now
+	return entry.limiter.Allow()
 }
 
 // rateLimitMiddleware gRPC 速率限制中间件（仅对 Login/Register 生效）
 func rateLimitMiddleware(limiter *perIPRateLimiter) middleware.Middleware {
 	return func(handler middleware.Handler) middleware.Handler {
 		return func(ctx context.Context, req interface{}) (interface{}, error) {
-			// 从 gRPC metadata 获取 method（兼容直连和网关转发场景）
-			md, _ := metadata.FromIncomingContext(ctx)
-			method := md.Get(":method") // Kratos/gRPC 标准 metadata key
-			if len(method) == 0 {
-				return handler(ctx, req) // 无法确定方法名，放行
+			// #5 fix: 使用 transport.FromServerContext 获取 gRPC Transport 信息
+			// ":method" 是 HTTP/2 伪头，不在 gRPC metadata 中，之前的行为导致限流完全失效
+			tr, ok := transport.FromServerContext(ctx)
+			if !ok {
+				return handler(ctx, req) // 无法获取 transport 信息，放行
 			}
-			if method[0] != "/api.user.v1.User/Login" && method[0] != "/api.user.v1.User/Register" {
+			method := tr.Operation()
+			if method != "/api.user.v1.User/Login" && method != "/api.user.v1.User/Register" {
 				return handler(ctx, req)
 			}
 			var ip string
@@ -135,7 +165,7 @@ func NewGRPCServer(c *conf.Server, logger log.Logger, svc *service.UserService) 
 			tracing.Server(),
 			logging.Server(logger),
 			validate.ProtoValidate(),
-			rateLimitMiddleware(newPerIPRateLimiter(10, 30, time.Minute)), // #34: Login/Register 10次/分突发30次
+			rateLimitMiddleware(newPerIPRateLimiter(10, 30, time.Minute)), // #34: Login/Register 10次/秒突发30
 		),
 	}
 	srv := kratosgrpc.NewServer(opts...)
