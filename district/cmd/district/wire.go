@@ -5,7 +5,6 @@ package main
 
 import (
 	"district/internal/biz"
-	"district/internal/cache"
 	"district/internal/conf"
 	"district/internal/data"
 	"district/internal/server"
@@ -21,8 +20,8 @@ import (
 type wireResult struct {
 	App     *kratos.App
 	AppData *data.Data
-	Cache   *cache.Cache
 	UseCase *biz.DistrictUseCase
+	Service *service.DistrictService
 }
 
 func wireApp(*conf.Server, *conf.Data, log.Logger, registry.Registrar) (wireResult, func(), error) {
@@ -31,12 +30,11 @@ func wireApp(*conf.Server, *conf.Data, log.Logger, registry.Registrar) (wireResu
 		data.ProviderSet,
 		service.ProviderSet,
 		biz.ProviderSet,
-		cache.New,
 		newApp,
 		newWireResult,
 	))
 }
 
-func newWireResult(app *kratos.App, appData *data.Data, c *cache.Cache, uc *biz.DistrictUseCase) wireResult {
-	return wireResult{App: app, AppData: appData, Cache: c, UseCase: uc}
+func newWireResult(app *kratos.App, appData *data.Data, uc *biz.DistrictUseCase, svc *service.DistrictService) wireResult {
+	return wireResult{App: app, AppData: appData, UseCase: uc, Service: svc}
 }

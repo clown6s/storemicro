@@ -128,6 +128,11 @@ func main() {
 		}
 	}()
 
+	// 预热 HTTP 响应缓存（跳过 JWT 直接调 grpc-gateway mux，避免首个真实请求承担 MISS 开销）
+	warmupCtx, warmupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer warmupCancel()
+	proxy.WarmupResponseCache(warmupCtx)
+
 	// 等待信号优雅退出
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

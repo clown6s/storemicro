@@ -1,10 +1,13 @@
 package proxy
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -29,6 +32,7 @@ import (
 	"gateway/internal/appconfig"
 	"gateway/internal/auth"
 	"gateway/internal/circuitbreaker"
+	gzipmw "gateway/internal/middleware"
 )
 
 // ServiceRegistration 描述一个后端 gRPC 服务的注册信息
@@ -49,7 +53,38 @@ type Proxy struct {
 	otelHandler    http.Handler
 	requestTimeout time.Duration // 单次 gRPC 请求超时
 	closeOnce      sync.Once     // #14: 防止 Close 被重复调用
+	// HTTP 响应缓存（内存级，用于大响应如 provinceTree）
+	respCache    map[string]*cachedResponse
+	respCacheMu  sync.RWMutex
+	respCacheTTL time.Duration
+	cachedPaths  map[string]struct{} // 需要缓存的路径白名单
 }
+
+// cachedResponse 缓存的完整 HTTP 响应
+type cachedResponse struct {
+	status   int
+	headers  http.Header
+	body     []byte
+	cachedAt time.Time
+}
+
+// cacheResponseWriter 捕获 HTTP 响应到内存 buffer（用于首次缓存）
+type cacheResponseWriter struct {
+	status int
+	header http.Header
+	buf    *bytes.Buffer
+}
+
+func (cw *cacheResponseWriter) Header() http.Header { return cw.header }
+func (cw *cacheResponseWriter) Write(b []byte) (int, error) {
+	if cw.status == 0 {
+		cw.status = http.StatusOK
+	}
+	return cw.buf.Write(b)
+}
+func (cw *cacheResponseWriter) WriteHeader(statusCode int) { cw.status = statusCode }
+func (cw *cacheResponseWriter) Flush()                     {} // gzip 中间件需要
+func (cw *cacheResponseWriter) CloseNotify() <-chan bool   { return nil }
 
 // New 创建 grpc-gateway 代理
 func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, error) {
@@ -58,6 +93,11 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 		origins:        cfg.Server.AllowOrigins,
 		proxies:        cfg.Server.TrustedProxies,
 		requestTimeout: cfg.GrpcClient.RequestTimeout,
+		respCacheTTL:   5 * time.Minute, // 缓存 TTL
+		respCache:      make(map[string]*cachedResponse),
+		cachedPaths: map[string]struct{}{
+			"/api/v1/district/provinceTree": {},
+		},
 	}
 
 	// 创建 Redis 客户端（连接池配置从配置读取）
@@ -200,18 +240,146 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 		pkglog.L().Info("service registered", zap.String("service", svc.Name))
 	}
 
-	// 预构建 otel handler（panic recovery → OpenTelemetry → CORS → security headers → JWT 认证 → grpc-gateway mux）
-	p.otelHandler = otelhttp.NewHandler(
+	// 预构建 otel handler（gzip → otel → panic recovery → CORS → security headers → JWT 认证 → grpc-gateway mux）
+	p.otelHandler = gzipmw.Gzip(otelhttp.NewHandler(
 		auth.RecoverMiddleware(auth.CORSMiddleware(p.origins)(auth.SecurityHeadersMiddleware(auth.JWTAuth(p.jwtSecret, p.rdb, p.proxies, p.mux)))),
 		"gateway",
-	)
+	))
 
 	return p, nil
 }
 
+// WarmupResponseCache 预热 HTTP 响应缓存
+// 直接调用 grpc-gateway mux，跳过 JWT 等中间件，手动 gzip 后存入缓存
+// 在 main.go 中 HTTP 服务器启动后调用，确保首个外部请求直接命中缓存
+func (p *Proxy) WarmupResponseCache(ctx context.Context) {
+	for cachePath := range p.cachedPaths {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, cachePath, nil)
+		if err != nil {
+			pkglog.L().Warn("warmup: bad path", zap.String("path", cachePath), zap.Error(err))
+			continue
+		}
+
+		cw := &cacheResponseWriter{header: make(http.Header), buf: &bytes.Buffer{}}
+		p.mux.ServeHTTP(cw, req)
+
+		if cw.status != http.StatusOK {
+			pkglog.L().Warn("warmup: non-200 response",
+				zap.Int("status", cw.status),
+				zap.String("path", cachePath),
+			)
+			continue
+		}
+
+		rawBody := cw.buf.Bytes()
+		now := time.Now()
+
+		// 缓存原始（非 gzip）版本
+		p.respCacheMu.Lock()
+		p.respCache[cachePath] = &cachedResponse{
+			status: cw.status, headers: cw.header.Clone(),
+			body: rawBody, cachedAt: now,
+		}
+		p.respCacheMu.Unlock()
+
+		// 缓存 gzip 版本
+		var gzBuf bytes.Buffer
+		gz := gzip.NewWriter(&gzBuf)
+		gz.Write(rawBody)
+		gz.Close()
+
+		gzHeaders := cw.header.Clone()
+		gzHeaders.Set("Content-Encoding", "gzip")
+		gzHeaders.Del("Content-Length")
+
+		p.respCacheMu.Lock()
+		p.respCache[cachePath+"?gzip"] = &cachedResponse{
+			status: cw.status, headers: gzHeaders,
+			body: gzBuf.Bytes(), cachedAt: now,
+		}
+		p.respCacheMu.Unlock()
+
+		pkglog.L().Info("response cache warmed up",
+			zap.String("path", cachePath),
+			zap.Int("rawSize", len(rawBody)),
+			zap.Int("gzipSize", gzBuf.Len()),
+		)
+	}
+}
+
 // ServeHTTP 实现 http.Handler 接口
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// 为每个请求设置独立的 gRPC 超时（从配置读取），防止后端挂起时阻塞到 HTTP WriteTimeout
+	// ===== HTTP 响应缓存：对指定路径的 GET 请求缓存完整响应（跳过 gRPC + JSON 序列化 + gzip） =====
+	if r.Method == http.MethodGet && r.URL.RawQuery == "" {
+		if _, shouldCache := p.cachedPaths[r.URL.Path]; shouldCache {
+			acceptGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
+			cacheKey := r.URL.Path
+			if acceptGzip {
+				cacheKey += "?gzip"
+			}
+
+			p.respCacheMu.RLock()
+			cached, hit := p.respCache[cacheKey]
+			p.respCacheMu.RUnlock()
+
+			if hit && time.Since(cached.cachedAt) < p.respCacheTTL {
+				// 命中：直接写回，跳过所有中间件和 gRPC 调用
+				for k, vv := range cached.headers {
+					for _, v := range vv {
+						w.Header().Add(k, v)
+					}
+				}
+				w.Header().Set("Cache-Control", "public, max-age=300")
+				w.Header().Set("Content-Length", strconv.Itoa(len(cached.body)))
+				w.Header().Set("X-Cache", "HIT")
+				w.WriteHeader(cached.status)
+				w.Write(cached.body)
+				return
+			}
+
+			// 未命中：走完整中间件链，捕获响应后缓存
+			ctx, cancel := context.WithTimeout(r.Context(), p.requestTimeout)
+
+			cw := &cacheResponseWriter{
+				header: make(http.Header),
+				buf:    &bytes.Buffer{},
+			}
+			p.otelHandler.ServeHTTP(cw, r.WithContext(ctx))
+			cancel()
+
+			// 只缓存 200 响应
+			if cw.status == http.StatusOK {
+				p.respCacheMu.Lock()
+				p.respCache[cacheKey] = &cachedResponse{
+					status:   cw.status,
+					headers:  cw.header.Clone(),
+					body:     cw.buf.Bytes(),
+					cachedAt: time.Now(),
+				}
+				p.respCacheMu.Unlock()
+
+				pkglog.L().Info("response cached",
+					zap.String("path", r.URL.Path),
+					zap.Bool("gzip", acceptGzip),
+					zap.Int("size", cw.buf.Len()),
+				)
+			}
+
+			// 写回给客户端
+			for k, vv := range cw.header {
+				for _, v := range vv {
+					w.Header().Add(k, v)
+				}
+			}
+			w.Header().Set("X-Cache", "MISS")
+			w.Header().Set("Content-Length", strconv.Itoa(cw.buf.Len()))
+			w.WriteHeader(cw.status)
+			w.Write(cw.buf.Bytes())
+			return
+		}
+	}
+
+	// ===== 非缓存路径：正常走中间件链 =====
 	ctx, cancel := context.WithTimeout(r.Context(), p.requestTimeout)
 	defer cancel()
 	p.otelHandler.ServeHTTP(w, r.WithContext(ctx))

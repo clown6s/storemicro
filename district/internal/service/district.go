@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"sync/atomic"
 
 	districtv1 "district/api/district/v1"
 	"district/internal/biz"
@@ -18,42 +19,71 @@ var ProviderSet = wire.NewSet(NewDistrictService)
 
 type DistrictService struct {
 	districtv1.UnimplementedDistrictServer
-	uc *biz.DistrictUseCase
+	uc        *biz.DistrictUseCase
+	treeCache atomic.Value // *districtv1.GetProvinceTreeResp — 全量树缓存（预热后只读）
 }
 
 // NewDistrictService 创建行政区 gRPC 服务
 func NewDistrictService(uc *biz.DistrictUseCase) *DistrictService {
-	return &DistrictService{uc: uc}
+	s := &DistrictService{uc: uc}
+	s.treeCache.Store((*districtv1.GetProvinceTreeResp)(nil))
+	return s
 }
 
 func (d *DistrictService) GetProvinceTree(ctx context.Context, req *districtv1.GetProvinceTreeReq) (*districtv1.GetProvinceTreeResp, error) {
-	zap.L().Debug("GetProvinceTree called", zap.String("adCode", req.AdCode))
+	// 全量查询：直接返回缓存的树（零建树开销）
+	if req.AdCode == "" {
+		if cached := d.treeCache.Load(); cached != nil {
+			if resp, ok := cached.(*districtv1.GetProvinceTreeResp); ok && resp != nil {
+				return resp, nil
+			}
+		}
+		// 缓存未就绪，走正常路径
+		return d.getAndBuild(ctx, "")
+	}
 
-	districts, err := d.uc.Get(ctx, req.AdCode)
+	// 指定 adCode：走 DB（biz 层有 sync.Map 缓存）
+	return d.getAndBuild(ctx, req.AdCode)
+}
 
+// getAndBuild 查询并构建树（仅用于 adCode 指定查询或缓存未就绪时的全量回退）
+func (d *DistrictService) getAndBuild(ctx context.Context, adCode string) (*districtv1.GetProvinceTreeResp, error) {
+	districts, err := d.uc.Get(ctx, adCode)
 	if err != nil {
 		if errors.Is(err, biz.ErrInvalidAdCode) {
 			return nil, status.Error(codes.InvalidArgument, err.Error())
 		}
-		zap.L().Error("GetProvinceTree failed", zap.String("adCode", req.AdCode), zap.Error(err))
+		zap.L().Error("GetProvinceTree failed", zap.String("adCode", adCode), zap.Error(err))
 		return nil, status.Error(codes.Internal, "internal error")
 	}
 	if len(districts) == 0 {
-		// [M4] 区分空查询（adCode 为空）与未找到（adCode 指定但不存在）
-		if req.AdCode == "" {
-			// 全量查询结果为空，返回 OK + 空数组
-			return &districtv1.GetProvinceTreeResp{
-				Data: []*districtv1.DistrictTree{},
-			}, nil
+		if adCode == "" {
+			return &districtv1.GetProvinceTreeResp{Data: []*districtv1.DistrictTree{}}, nil
 		}
 		return nil, status.Error(codes.NotFound, "district not found")
 	}
 
 	tree := buildDistrictTree(districts)
+	return &districtv1.GetProvinceTreeResp{Data: tree}, nil
+}
 
-	return &districtv1.GetProvinceTreeResp{
-		Data: tree,
-	}, nil
+// WarmupTreeCache 预热全量树缓存：启动时构建一次，后续请求直接返回
+func (d *DistrictService) WarmupTreeCache(ctx context.Context) {
+	districts, err := d.uc.Get(ctx, "")
+	if err != nil {
+		zap.L().Error("WarmupTreeCache failed", zap.Error(err))
+		return
+	}
+	if len(districts) == 0 {
+		zap.L().Warn("WarmupTreeCache: no districts loaded")
+		d.treeCache.Store(&districtv1.GetProvinceTreeResp{Data: []*districtv1.DistrictTree{}})
+		return
+	}
+
+	tree := buildDistrictTree(districts)
+	resp := &districtv1.GetProvinceTreeResp{Data: tree}
+	d.treeCache.Store(resp)
+	zap.L().Info("tree cache warmup completed", zap.Int("count", len(districts)))
 }
 
 // buildDistrictTree 将平铺的行政区列表构建为树结构

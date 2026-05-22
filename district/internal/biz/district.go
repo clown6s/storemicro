@@ -3,11 +3,10 @@ package biz
 import (
 	"context"
 	"errors"
-	"fmt"
 	"regexp"
+	"sync"
+	"sync/atomic"
 	"time"
-
-	"district/internal/cache"
 
 	"github.com/google/wire"
 	"go.uber.org/zap"
@@ -38,21 +37,19 @@ type DistrictRepo interface {
 
 // DistrictUseCase 行政区用例
 type DistrictUseCase struct {
-	repo  DistrictRepo
-	cache *cache.Cache
+	repo         DistrictRepo
+	allDistricts atomic.Value // []*District — 全量省市区数据（atomic.Value 确定性缓存，零 miss）
+	subCache     sync.Map     // map[string][]*District — 指定 adCode 子树缓存
+	refreshMu    sync.Mutex
+	refreshTimer *time.Timer
+	closed       atomic.Bool
 }
 
 // NewDistrictUseCase 创建行政区用例
-func NewDistrictUseCase(repo DistrictRepo, c *cache.Cache) *DistrictUseCase {
-	return &DistrictUseCase{repo: repo, cache: c}
-}
-
-// cacheKey 根据请求参数生成缓存 key
-func cacheKey(adCode string) string {
-	if adCode == "" {
-		return "district:tree:all"
-	}
-	return fmt.Sprintf("district:tree:%s", adCode)
+func NewDistrictUseCase(repo DistrictRepo) *DistrictUseCase {
+	uc := &DistrictUseCase{repo: repo}
+	uc.allDistricts.Store([]*District{})
+	return uc
 }
 
 func (u *DistrictUseCase) Get(ctx context.Context, adCode string) ([]*District, error) {
@@ -60,12 +57,14 @@ func (u *DistrictUseCase) Get(ctx context.Context, adCode string) ([]*District, 
 		return nil, ErrInvalidAdCode
 	}
 
-	// 尝试读缓存
-	key := cacheKey(adCode)
-	var cached []*District
-	if u.cache.Get(key, &cached) {
-		zap.L().Debug("district cache hit", zap.String("key", key))
-		return cached, nil
+	// 全量查询：直接读 atomic.Value（零 miss）
+	if adCode == "" {
+		return u.allDistricts.Load().([]*District), nil
+	}
+
+	// 指定 adCode：先查 sync.Map
+	if val, ok := u.subCache.Load(adCode); ok {
+		return val.([]*District), nil
 	}
 
 	// 缓存未命中，查 DB
@@ -74,23 +73,12 @@ func (u *DistrictUseCase) Get(ctx context.Context, adCode string) ([]*District, 
 		return nil, err
 	}
 
-	// 空结果也缓存（穿透保护），TTL 5 分钟
-	if len(districts) == 0 {
-		u.cache.Set(key, []*District{}, 5*time.Minute)
-		return districts, nil
-	}
-
-	// 写入缓存，全量 24h，指定 adCode 1h
-	ttl := 1 * time.Hour
-	if adCode == "" {
-		ttl = 24 * time.Hour
-	}
-	u.cache.Set(key, districts, ttl)
-
+	// 写入 sync.Map
+	u.subCache.Store(adCode, districts)
 	return districts, nil
 }
 
-// Warmup 预热缓存：启动时加载全量省市区数据
+// Warmup 预热缓存：启动时加载全量省市区数据到 atomic.Value
 func (u *DistrictUseCase) Warmup(ctx context.Context) {
 	zap.L().Info("warming up district cache...")
 	districts, err := u.repo.Get(ctx, "")
@@ -98,7 +86,47 @@ func (u *DistrictUseCase) Warmup(ctx context.Context) {
 		zap.L().Error("district cache warmup failed", zap.Error(err))
 		return
 	}
-	key := cacheKey("")
-	u.cache.Set(key, districts, 24*time.Hour)
+	if districts == nil {
+		districts = []*District{}
+	}
+	u.allDistricts.Store(districts)
 	zap.L().Info("district cache warmup completed", zap.Int("count", len(districts)))
+}
+
+// Refresh 全量刷新缓存（数据变更后调用，防抖 500ms）
+func (u *DistrictUseCase) Refresh() {
+	u.refreshMu.Lock()
+	defer u.refreshMu.Unlock()
+
+	if u.closed.Load() {
+		return
+	}
+	if u.refreshTimer != nil {
+		u.refreshTimer.Stop()
+	}
+	u.refreshTimer = time.AfterFunc(500*time.Millisecond, func() {
+		if u.closed.Load() {
+			return
+		}
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			u.Warmup(ctx)
+			// 清空子树缓存，下次请求重新查
+			u.subCache.Range(func(key, _ any) bool {
+				u.subCache.Delete(key)
+				return true
+			})
+		}()
+	})
+}
+
+// Close 停止刷新定时器
+func (u *DistrictUseCase) Close() {
+	u.closed.Store(true)
+	u.refreshMu.Lock()
+	defer u.refreshMu.Unlock()
+	if u.refreshTimer != nil {
+		u.refreshTimer.Stop()
+	}
 }

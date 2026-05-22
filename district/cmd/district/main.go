@@ -173,10 +173,13 @@ func main() {
 	}
 	defer cleanup()
 
-	// 预热省市区缓存（启动时从 DB 加载全量数据到 ristretto）
+	// 预热省市区缓存（启动时从 DB 加载全量数据到 atomic.Value）
 	warmupCtx, warmupCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	result.UseCase.Warmup(warmupCtx)
+	// 预热全量树缓存（构建一次树，后续请求直接返回）
+	result.Service.WarmupTreeCache(warmupCtx)
 	warmupCancel()
+	defer result.UseCase.Close()
 
 	helper.Infow("msg", "service started", "name", Name)
 
