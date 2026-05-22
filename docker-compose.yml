@@ -1,19 +1,35 @@
 # ============================================================
-# StoreMicro 全栈编排 — 基础设施 + 微服务
+# StoreMicro 全栈编排 — 生产级配置
 # ============================================================
 # 使用: docker compose up -d
 #
 # 启动顺序: MySQL → Redis/etcd → user/district → gateway
-# 注意:
-# 1. 生产环境应修改密码（搜索 admin@zzp 替换为强密码）
-# 2. 生产环境应启用 TLS（见各服务配置文件中的注释）
+#
+# ⚠️ 生产环境部署前必须修改:
+# 1. x-password: 替换为强密码（至少32位，含大小写+数字+特殊字符）
+# 2. x-jwt-secret: 替换为独立的随机密钥（至少64位）
+# 3. x-metrics-password: 设置 metrics 监控密码
 # ============================================================
 
 name: storemicro
 
+# ---- 全局锚点 ----
 x-timezone: &timezone "Asia/Shanghai"
-x-password: &password "admin@zzp"
-x-jwt-secret: &jwt-secret '4*8#5@7!^i(nj_9876555=+s4x3v9g12m`js0lmb8(-=+-_!`~||\]}mb<.?,.>>,mncukdkieijufonicndknveufw3io'
+x-password: &password "CHANGE_ME_STRONG_PASSWORD_32CHARS_MIN"
+x-jwt-secret: &jwt-secret "CHANGE_ME_RANDOM_JWT_SECRET_AT_LEAST_64_CHARS_LONG"
+x-metrics-password: &metrics-password "CHANGE_ME_METRICS_PASSWORD"
+
+# 容器日志限制：单文件50MB，最多保留5个（总计250MB/容器）
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+    tag: "{{.Name}}"
+    compress: "true"
+
+# 停止信号与优雅关闭超时
+x-stop-grace: &stop-grace 30s
 
 services:
 
@@ -28,12 +44,36 @@ services:
       TZ: *timezone
       MYSQL_ROOT_PASSWORD: *password
       MYSQL_DATABASE: store_micro
+      # 安全：禁止空密码、禁止远程root登录
+      MYSQL_ALLOW_EMPTY_PASSWORD: "no"
+      MYSQL_ROOT_HOST: "localhost"
+      # 字符集：默认 utf8mb4，emoji兼容
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --skip-character-set-client-handshake
+      --default-authentication-plugin=caching_sha2_password
+      --skip-name-resolve
+      --skip-host-cache
+      --max-connections=200
+      --innodb-buffer-pool-size=256M
+      --innodb-flush-log-at-trx-commit=1
+      --innodb-flush-method=O_DIRECT
+      --sync-binlog=1
+      --slow-query-log=1
+      --long-query-time=2
+      --log-queries-not-using-indexes=1
+      --sql-mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
+      --local-infile=0
     # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
     # ports:
     #   - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
-    restart: unless-stopped
+    restart: always
+    stop_grace_period: 60s
     deploy:
       resources:
         limits:
@@ -42,11 +82,12 @@ services:
         reservations:
           memory: 256M
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 30s
+      start_period: 60s
+    logging: *logging
     networks:
       - internal
 
@@ -55,13 +96,27 @@ services:
     container_name: storemicro-redis
     environment:
       TZ: *timezone
-    command: redis-server --requirepass admin@zzp --appendonly yes --appendfsync everysec
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:-admin@zzp}
+      --appendonly yes
+      --appendfsync everysec
+      --maxmemory 192mb
+      --maxmemory-policy allkeys-lru
+      --rename-command FLUSHALL ""
+      --rename-command FLUSHDB ""
+      --rename-command DEBUG ""
+      --rename-command CONFIG ""
+      --hz 100
+      --tcp-keepalive 300
+      --timeout 0
     # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
     # ports:
     #   - "6379:6379"
     volumes:
       - redis_data:/data
-    restart: unless-stopped
+    restart: always
+    stop_grace_period: *stop-grace
     deploy:
       resources:
         limits:
@@ -70,11 +125,12 @@ services:
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD", "redis-cli", "-a", "admin@zzp", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-admin@zzp}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 3
       start_period: 10s
+    logging: *logging
     networks:
       - internal
 
@@ -89,10 +145,21 @@ services:
     # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
     # ports:
     #   - "2379:2379"
+    command: >
+      /usr/local/bin/etcd
+      --name etcd
+      --data-dir /data
+      --listen-client-urls http://0.0.0.0:2379
+      --advertise-client-urls http://etcd:2379
+      --auto-compaction-retention=1h
+      --auto-compaction-mode=periodic
+      --snapshot-count=10000
+      --quota-backend-bytes=2147483648
+      --max-request-bytes=1048576
     volumes:
       - etcd_data:/data
-    entrypoint: /usr/local/bin/etcd
-    restart: unless-stopped
+    restart: always
+    stop_grace_period: *stop-grace
     deploy:
       resources:
         limits:
@@ -106,6 +173,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    logging: *logging
     networks:
       - internal
 
@@ -131,7 +199,13 @@ services:
       REDIS_PORT: "6379"
       ETCD_ENDPOINT: etcd:2379
       JWT_SECRET: *jwt-secret
+      METRICS_PASSWORD: *metrics-password
       LOG_LEVEL: info
+      LOG_MODE: prod
+      GOGC: "100"
+      GOMEMLIMIT: "400MiB"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     depends_on:
       mysql:
         condition: service_healthy
@@ -139,7 +213,8 @@ services:
         condition: service_healthy
       etcd:
         condition: service_healthy
-    restart: unless-stopped
+    restart: always
+    stop_grace_period: *stop-grace
     deploy:
       resources:
         limits:
@@ -153,6 +228,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    logging: *logging
+    pids_limit: 64
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     networks:
       - app
       - internal
@@ -171,13 +252,20 @@ services:
       DB_HOST: mysql
       DB_PORT: "3306"
       ETCD_ENDPOINT: etcd:2379
+      METRICS_PASSWORD: *metrics-password
       LOG_LEVEL: info
+      LOG_MODE: prod
+      GOGC: "100"
+      GOMEMLIMIT: "200MiB"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
     depends_on:
       mysql:
         condition: service_healthy
       etcd:
         condition: service_healthy
-    restart: unless-stopped
+    restart: always
+    stop_grace_period: *stop-grace
     deploy:
       resources:
         limits:
@@ -191,6 +279,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    logging: *logging
+    pids_limit: 64
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     networks:
       - app
       - internal
@@ -209,8 +303,13 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       ETCD_ENDPOINT: etcd:2379
-      METRICS_PASSWORD: ""
+      METRICS_PASSWORD: *metrics-password
       LOG_LEVEL: info
+      LOG_MODE: prod
+      GOGC: "100"
+      GOMEMLIMIT: "400MiB"
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     depends_on:
       user:
         condition: service_healthy
@@ -218,7 +317,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    restart: unless-stopped
+    restart: always
+    stop_grace_period: *stop-grace
     deploy:
       resources:
         limits:
@@ -232,6 +332,12 @@ services:
       timeout: 5s
       retries: 3
       start_period: 30s
+    logging: *logging
+    pids_limit: 64
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     networks:
       - app
       - internal
