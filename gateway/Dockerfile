@@ -3,8 +3,10 @@ FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache git
 
-# China Go module proxy
-ENV GOPROXY=https://goproxy.cn,direct
+# China Go module proxy (multiple fallback sources for reliability)
+ENV GOPROXY=https://goproxy.cn,https://goproxy.io,https://proxy.golang.org,direct
+ENV GOSUMDB=sum.golang.org
+ENV GONOSUMDB=off
 
 WORKDIR /app
 
