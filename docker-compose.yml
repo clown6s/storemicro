@@ -47,7 +47,6 @@ services:
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
-      - --skip-character-set-client-handshake
       - --default-authentication-plugin=caching_sha2_password
       - --skip-name-resolve
       - --skip-host-cache
@@ -108,13 +107,13 @@ services:
       - '""'
       - --rename-command
       - "FLUSHDB"
-      - '""'
+      - "disabled_FLUSHDB"
       - --rename-command
       - "DEBUG"
-      - '""'
+      - "disabled_DEBUG"
       - --rename-command
       - "CONFIG"
-      - '""'
+      - "disabled_CONFIG"
       - --hz
       - "100"
       - --tcp-keepalive
@@ -151,8 +150,6 @@ services:
     environment:
       TZ: *timezone
       ALLOW_NONE_AUTHENTICATION: "yes"
-      ETCD_LISTEN_CLIENT_URLS: http://0.0.0.0:2379
-      ETCD_ADVERTISE_CLIENT_URLS: http://etcd:2379
     # 不暴露端口到宿主机，仅容器间通信（生产环境必须）
     # ports:
     #   - "2379:2379"
