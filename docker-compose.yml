@@ -443,7 +443,7 @@ services:
       - "4318:4318"     # OTLP HTTP
     volumes:
       - ./jaeger/jaeger-config.yaml:/etc/jaeger/config.yaml:ro
-      - jaeger_data:/var/lib/jaeger
+      - ./jaeger/data:/var/lib/jaeger
     command: --config=/etc/jaeger/config.yaml
     environment:
       TZ: *timezone
@@ -453,6 +453,12 @@ services:
       - "no-new-privileges:true"
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - FOWNER
+      - DAC_OVERRIDE
+      - SETGID
+      - SETUID
     deploy:
       resources:
         limits:
@@ -609,5 +615,3 @@ volumes:
     name: storemicro-loki-data
   grafana_data:
     name: storemicro-grafana-data
-  jaeger_data:
-    name: storemicro-jaeger-data
