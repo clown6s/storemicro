@@ -449,7 +449,6 @@ services:
       - --storage.tsdb.retention.time=7d
       - --web.console.libraries=/usr/share/prometheus/console_libraries
       - --web.console.templates=/usr/share/prometheus/consoles
-      - --no-scrape-manager
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
       - /prometheus/wal:rw,noexec,nosuid
