@@ -162,7 +162,7 @@ services:
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$REDISCLI_AUTH\" ping 2>/dev/null"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDISCLI_AUTH\" ping 2>/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5
