@@ -589,6 +589,7 @@ services:
     logging: *logging
     networks:
       - app
+      - internal
 
 # ============================================================
 # 网络
