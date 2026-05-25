@@ -451,7 +451,6 @@ services:
       - --web.console.templates=/usr/share/prometheus/consoles
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
-      - /prometheus/wal:rw,noexec,nosuid
     environment:
       TZ: *timezone
     restart: always
