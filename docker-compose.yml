@@ -162,7 +162,7 @@ services:
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$$REDISCLI_AUTH\" ping 2>/dev/null"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDISCLI_AUTH\" ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -254,7 +254,7 @@ services:
       - ALL
     ports:
       - "6001:6001"
-      - "9101:9101"
+#      - "9101:9101"   # metrics 端口，生产环境不暴露
     environment:
       TZ: *timezone
       DB_PASSWORD: *password
@@ -321,7 +321,7 @@ services:
       - ALL
     ports:
       - "6002:6002"
-      - "9103:9103"
+#      - "9103:9103"   # metrics 端口，生产环境不暴露
     environment:
       TZ: *timezone
       DB_PASSWORD: *password
@@ -430,6 +430,56 @@ services:
       - internal
 
   # =========================
+  # 可观测性：指标监控
+  # =========================
+
+  prometheus:
+    image: prom/prometheus:v3.4.0
+    container_name: storemicro-prometheus
+    user: "65534:65534"
+    read_only: true
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+      - --web.console.libraries=/usr/share/prometheus/console_libraries
+      - --web.console.templates=/usr/share/prometheus/consoles
+      - --no-scrape-manager
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+      - /prometheus/wal:rw,noexec,nosuid
+    environment:
+      TZ: *timezone
+    restart: always
+    stop_grace_period: *stop-grace
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+          pids: 128
+        reservations:
+          memory: 128M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *logging
+    networks:
+      - app
+
+  # =========================
   # 可观测性：链路追踪
   # =========================
 
@@ -438,8 +488,8 @@ services:
     container_name: storemicro-jaeger
     user: "0:0"
     ports:
-      - "16686:16686"   # Jaeger UI
-      - "4317:4317"     # OTLP gRPC
+      - "127.0.0.1:16686:16686"   # Jaeger UI（仅本机访问，生产应通过反向代理）
+      - "4317:4317"     # OTLP gRPC（内部服务上报用）
       - "4318:4318"     # OTLP HTTP
     volumes:
       - ./jaeger/jaeger-config.yaml:/etc/jaeger/config.yaml:ro
@@ -485,7 +535,7 @@ services:
     image: grafana/loki:3.5.1
     container_name: storemicro-loki
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100"
     command: -config.file=/etc/loki/local-config.yaml -config.expand-env=true
     volumes:
       - loki_data:/loki
@@ -617,3 +667,5 @@ volumes:
     name: storemicro-loki-data
   grafana_data:
     name: storemicro-grafana-data
+  prometheus_data:
+    name: storemicro-prometheus-data

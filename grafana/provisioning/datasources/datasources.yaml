@@ -13,3 +13,9 @@ datasources:
     access: proxy
     url: http://storemicro-jaeger:16686
     editable: false
+
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://storemicro-prometheus:9090
+    editable: false
