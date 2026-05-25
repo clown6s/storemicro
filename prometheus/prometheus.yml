@@ -4,18 +4,20 @@ global:
   scrape_timeout: 10s
 
 scrape_configs:
-  # ---- 微服务 metrics ----
   - job_name: "storemicro-gateway"
     metrics_path: /metrics
+    bearer_token: admin@zzp
     static_configs:
       - targets: ["storemicro-gateway:7000"]
 
   - job_name: "storemicro-user"
     metrics_path: /metrics
+    bearer_token: admin@zzp
     static_configs:
       - targets: ["storemicro-user:9101"]
 
   - job_name: "storemicro-district"
     metrics_path: /metrics
+    bearer_token: admin@zzp
     static_configs:
       - targets: ["storemicro-district:9103"]
