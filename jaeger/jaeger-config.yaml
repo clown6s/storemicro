@@ -17,9 +17,12 @@ extensions:
     backends:
       main:
         badger:
-          directory_key: "/var/lib/jaeger/badger/key"
-          directory_value: "/var/lib/jaeger/badger/value"
+          directories:
+            keys: "/var/lib/jaeger/badger/key"
+            values: "/var/lib/jaeger/badger/value"
           ephemeral: false
+          ttl:
+            spans: 48h
 
 receivers:
   otlp:
