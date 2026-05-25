@@ -436,7 +436,7 @@ services:
   prometheus:
     image: prom/prometheus:v3.11.2
     container_name: storemicro-prometheus
-    user: "65534:65534"
+    user: "0:0"
     read_only: true
     ports:
       - "9090:9090"

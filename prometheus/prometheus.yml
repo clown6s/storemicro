@@ -13,15 +13,9 @@ scrape_configs:
   - job_name: "storemicro-user"
     metrics_path: /metrics
     static_configs:
-      - targets: ["storemicro-user:6001"]
+      - targets: ["storemicro-user:9101"]
 
   - job_name: "storemicro-district"
     metrics_path: /metrics
     static_configs:
-      - targets: ["storemicro-district:6002"]
-
-  # ---- 基础设施 ----
-  - job_name: "redis"
-    metrics_path: /metrics
-    static_configs:
-      - targets: ["storemicro-redis:6379"]
+      - targets: ["storemicro-district:9103"]
