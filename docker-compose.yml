@@ -22,9 +22,9 @@ name: storemicro
 
 # ---- 全局锚点 ----
 x-timezone: &timezone "Asia/Shanghai"
-x-password: &password "CHANGE_ME_STRONG_PASSWORD_32CHARS_MIN"
-x-jwt-secret: &jwt-secret "CHANGE_ME_RANDOM_JWT_SECRET_AT_LEAST_64_CHARS_LONG"
-x-metrics-password: &metrics-password "CHANGE_ME_METRICS_PASSWORD"
+x-password: &password "admin@zzp"
+x-jwt-secret: &jwt-secret "storemicro_jwt_secret_2026_for_dev_and_test_only_change_in_production_64chars"
+x-metrics-password: &metrics-password "admin@zzp"
 
 # 容器日志限制：单文件50MB，最多保留5个（总计250MB/容器）
 x-logging: &logging
