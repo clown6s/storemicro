@@ -512,9 +512,6 @@ services:
   promtail:
     image: grafana/promtail:3.5.1
     container_name: storemicro-promtail
-    user: "1000:1000"
-    group_add:
-      - "docker"
     read_only: true
     security_opt:
       - "no-new-privileges:true"
