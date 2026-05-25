@@ -152,6 +152,7 @@ services:
       - DAC_OVERRIDE
       - SETGID
       - SETUID
+      - SETPCAP
     deploy:
       resources:
         limits:
