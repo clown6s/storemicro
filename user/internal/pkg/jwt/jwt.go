@@ -1,7 +1,10 @@
 package jwt
 
 import (
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -16,17 +19,43 @@ type Claims struct {
 // RefreshExpireHours refresh token 有效期（7 天 = 168 小时）
 const RefreshExpireHours = 168
 
+// SigningMethod 支持的签名算法
+type SigningMethod string
+
+const (
+	SigningMethodHS256 SigningMethod = "HS256"
+	SigningMethodRS256 SigningMethod = "RS256"
+	SigningMethodES256 SigningMethod = "ES256"
+)
+
 // JWT 工具
 type JWT struct {
-	secret    []byte
-	expireHrs int64
-	issuer    string
+	secret        []byte        // HS256 密钥
+	refreshSecret []byte        // Refresh Token 独立密钥（HS256），为空则复用 secret
+	method        SigningMethod // 签名算法
+	privateKey    any           // RS256/ES256 私钥（*rsa.PrivateKey 或 *ecdsa.PrivateKey）
+	expireHrs     int64
+	issuer        string
 }
 
-// NewJWT 创建 JWT 工具
-func NewJWT(secret string, expireHrs int64) *JWT {
-	if len(secret) < 32 {
-		panic("jwt secret must be at least 32 characters")
+// NewJWT 创建 JWT 工具（HS256 模式）
+// refreshSecret 为空时复用 secret 签发 Refresh Token
+func NewJWT(secret string, refreshSecret string, expireHrs int64) *JWT {
+	return newJWTWithOptions(secret, refreshSecret, expireHrs, SigningMethodHS256, "")
+}
+
+// NewJWTWithKey 创建 JWT 工具（RS256/ES256 模式，需指定私钥文件路径）
+// refreshSecret 在非对称算法下被忽略（Refresh Token 使用相同私钥签名）
+func NewJWTWithKey(secret string, expireHrs int64, method SigningMethod, privateKeyPath string) (*JWT, error) {
+	if method == SigningMethodHS256 {
+		return nil, fmt.Errorf("use NewJWT for HS256, not NewJWTWithKey")
+	}
+	return newJWTWithOptions(secret, "", expireHrs, method, privateKeyPath), nil
+}
+
+func newJWTWithOptions(secret, refreshSecret string, expireHrs int64, method SigningMethod, privateKeyPath string) *JWT {
+	if method != SigningMethodHS256 && privateKeyPath == "" {
+		panic(fmt.Sprintf("jwt: private key path required for %s", method))
 	}
 	if expireHrs <= 0 {
 		panic("jwt expire_hours must be positive")
@@ -34,10 +63,77 @@ func NewJWT(secret string, expireHrs int64) *JWT {
 	if expireHrs > 24 {
 		panic("jwt expire_hours too large (max 24 = 1 day)")
 	}
-	return &JWT{
+
+	j := &JWT{
 		secret:    []byte(secret),
 		expireHrs: expireHrs,
 		issuer:    "storemicro-auth",
+		method:    method,
+	}
+
+	// HS256: 校验 secret 长度
+	if method == SigningMethodHS256 {
+		if len(secret) < 32 {
+			panic("jwt secret must be at least 32 characters")
+		}
+		// Refresh Token 独立密钥，为空则复用 access secret
+		if refreshSecret != "" {
+			if len(refreshSecret) < 32 {
+				panic("jwt refresh secret must be at least 32 characters")
+			}
+			j.refreshSecret = []byte(refreshSecret)
+		} else {
+			j.refreshSecret = j.secret
+		}
+	} else {
+		// RS256/ES256: 从文件加载私钥
+		j.privateKey = loadPrivateKey(privateKeyPath)
+		j.refreshSecret = j.secret // 非对称模式下 refresh 标记（实际用 private key 签名）
+	}
+
+	return j
+}
+
+// loadPrivateKey 从 PEM 文件加载私钥
+func loadPrivateKey(path string) any {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		panic(fmt.Sprintf("jwt: failed to read private key file %s: %v", path, err))
+	}
+
+	block, _ := pem.Decode(data)
+	if block == nil {
+		panic(fmt.Sprintf("jwt: no PEM block found in %s", path))
+	}
+
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key // RSA
+	}
+
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		return key // RSA or ECDSA (PKCS8)
+	}
+
+	panic(fmt.Sprintf("jwt: failed to parse private key from %s (not PKCS1 or PKCS8)", path))
+}
+
+// refreshUsesSeparateKey 标记 Refresh Token 是否使用独立密钥
+func (j *JWT) refreshUsesSeparateKey() bool {
+	return string(j.refreshSecret) != string(j.secret)
+}
+
+// signingKey 返回签名密钥和算法
+func (j *JWT) signingKey(useRefresh bool) (any, jwt.SigningMethod) {
+	switch j.method {
+	case SigningMethodRS256:
+		return j.privateKey, jwt.SigningMethodRS256
+	case SigningMethodES256:
+		return j.privateKey, jwt.SigningMethodES256
+	default: // HS256
+		if useRefresh {
+			return j.refreshSecret, jwt.SigningMethodHS256
+		}
+		return j.secret, jwt.SigningMethodHS256
 	}
 }
 
@@ -47,7 +143,6 @@ func (j *JWT) GenerateToken(userID int64) (string, error) {
 	claims := Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
-			// [L3] 补全标准 claims
 			Issuer:    j.issuer,
 			Subject:   fmt.Sprintf("%d", userID),
 			Audience:  jwt.ClaimStrings{"storemicro-api"},
@@ -56,17 +151,21 @@ func (j *JWT) GenerateToken(userID int64) (string, error) {
 			NotBefore: jwt.NewNumericDate(now),
 		},
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(j.secret)
+	key, method := j.signingKey(false)
+	token := jwt.NewWithClaims(method, claims)
+	return token.SignedString(key)
 }
 
 // ParseRefreshToken 解析并校验 refresh token（签名 + audience + 过期时间）
 func (j *JWT) ParseRefreshToken(tokenStr string) (*Claims, error) {
 	token, err := jwt.ParseWithClaims(tokenStr, &Claims{}, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		// 校验签名算法是否匹配配置
+		_, method := j.signingKey(true)
+		if token.Method.Alg() != method.Alg() {
 			return nil, jwt.ErrSignatureInvalid
 		}
-		return j.secret, nil
+		key, _ := j.signingKey(true)
+		return key, nil
 	}, jwt.WithAudience("storemicro-refresh"), jwt.WithIssuer(j.issuer))
 	if err != nil || !token.Valid {
 		return nil, fmt.Errorf("invalid refresh token: %w", err)
@@ -78,7 +177,6 @@ func (j *JWT) ParseRefreshToken(tokenStr string) (*Claims, error) {
 	}
 
 	// 防御性过期校验：jwt.ParseWithClaims 已内置过期检查，此处作为额外防线
-	// 处理极端情况：token 恰好在 ParseWithClaims 和此处检查之间过期
 	if c.ExpiresAt == nil || c.ExpiresAt.Before(time.Now()) {
 		return nil, fmt.Errorf("refresh token expired")
 	}
@@ -105,6 +203,7 @@ func (j *JWT) GenerateRefreshToken(userID int64) (string, error) {
 			NotBefore: jwt.NewNumericDate(now),
 		},
 	}
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(j.secret)
+	key, method := j.signingKey(true)
+	token := jwt.NewWithClaims(method, claims)
+	return token.SignedString(key)
 }

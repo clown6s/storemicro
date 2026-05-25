@@ -354,13 +354,13 @@ func JWTAuth(secret string, rdb *redis.Client, trustedProxies []string, next htt
 			writeJSON(w, http.StatusUnauthorized, `{"code":401,"message":"token expired, please re-login"}`)
 			return
 		} else if err != nil {
-			pkglog.L().Error("redis check token failed, fail-closed",
+			// Redis 不可用时 fail-open：仅依赖 JWT 签名校验放行，记录告警但不拒绝请求
+			// 风险：已登出/改密码的用户在此窗口内 token 仍有效，但保证了服务可用性
+			pkglog.L().Error("redis check token failed, fail-open (degraded security)",
 				zap.String("path", cleaned),
 				zap.Int64("user_id", c.UserID),
 				zap.Error(err),
 			)
-			writeJSON(w, http.StatusServiceUnavailable, `{"code":503,"message":"service temporarily unavailable"}`)
-			return
 		}
 
 		// 校验 Redis 中 token 对应的 userID 与 JWT claims 一致

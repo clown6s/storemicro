@@ -1,11 +1,16 @@
 package proxy
 
 import (
+	"bufio"
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -241,10 +246,17 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 	}
 
 	// 预构建 otel handler（gzip → otel → panic recovery → CORS → security headers → JWT 认证 → grpc-gateway mux）
-	p.otelHandler = gzipmw.Gzip(otelhttp.NewHandler(
-		auth.RecoverMiddleware(auth.CORSMiddleware(p.origins)(auth.SecurityHeadersMiddleware(auth.JWTAuth(p.jwtSecret, p.rdb, p.proxies, p.mux)))),
-		"gateway",
-	))
+	// refresh cookie 中间件包装在最外层（gzip 之前），拦截 login/refresh 响应设置 HttpOnly cookie
+	muxWithAuth := auth.JWTAuth(p.jwtSecret, p.rdb, p.proxies, p.mux)
+	secured := auth.CORSMiddleware(p.origins)(auth.SecurityHeadersMiddleware(auth.RecoverMiddleware(muxWithAuth)))
+	otelWrapped := gzipmw.Gzip(otelhttp.NewHandler(secured, "gateway"))
+	// refresh cookie：从 cookie 注入 refresh token 到请求 body + 从响应 body 中提取到 cookie
+	p.otelHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !injectRefreshTokenFromCookie(w, r) {
+			return
+		}
+		stripRefreshTokenFromResponse(w, r, otelWrapped)
+	})
 
 	return p, nil
 }
@@ -310,6 +322,9 @@ func (p *Proxy) WarmupResponseCache(ctx context.Context) {
 // ServeHTTP 实现 http.Handler 接口
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ===== HTTP 响应缓存：对指定路径的 GET 请求缓存完整响应（跳过 gRPC + JSON 序列化 + gzip） =====
+	// ⚠️ 安全断言：cachedPaths 仅允许添加公开接口（无需认证即可访问的数据）
+	//    如果将需要认证的接口加入此列表，缓存命中时会绕过 JWT 认证中间件
+	//    新增缓存路径时必须进行安全审查
 	if r.Method == http.MethodGet && r.URL.RawQuery == "" {
 		if _, shouldCache := p.cachedPaths[r.URL.Path]; shouldCache {
 			acceptGzip := strings.Contains(r.Header.Get("Accept-Encoding"), "gzip")
@@ -464,4 +479,167 @@ func customRoutingErrorHandler(ctx context.Context, mux *runtime.ServeMux, marsh
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"code":404,"message":"not found"}`))
 	}
+}
+
+// refreshCookieName refresh token cookie 名称
+const refreshCookieName = "storemicro_refresh_token"
+
+// setRefreshTokenCookie 设置 Refresh Token 为 HttpOnly Cookie
+// Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=7d
+func setRefreshTokenCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   7 * 24 * 3600, // 7 天，与 RefreshExpireHours 一致
+	})
+}
+
+// clearRefreshTokenCookie 清除 Refresh Token Cookie（登出/改密码时调用）
+func clearRefreshTokenCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   -1,
+	})
+}
+
+// refreshCookieResponseWriter 拦截响应，将 refresh_token 从 body 移到 cookie
+type refreshCookieResponseWriter struct {
+	http.ResponseWriter
+	body       bytes.Buffer
+	statusCode int
+}
+
+func (rw *refreshCookieResponseWriter) Write(b []byte) (int, error) {
+	return rw.body.Write(b)
+}
+
+func (rw *refreshCookieResponseWriter) WriteHeader(statusCode int) {
+	rw.statusCode = statusCode
+}
+
+func (rw *refreshCookieResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	if hj, ok := rw.ResponseWriter.(http.Hijacker); ok {
+		return hj.Hijack()
+	}
+	return nil, nil, fmt.Errorf("underlying ResponseWriter does not implement Hijacker")
+}
+
+func (rw *refreshCookieResponseWriter) Flush() {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+// stripRefreshTokenFromResponse 拦截 login/refresh 响应，将 refreshToken 从 JSON body 中移除并设置为 HttpOnly Cookie
+func stripRefreshTokenFromResponse(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	rw := &refreshCookieResponseWriter{ResponseWriter: w}
+	next.ServeHTTP(rw, r)
+
+	// 只处理 200 响应
+	if rw.statusCode != 0 && rw.statusCode != http.StatusOK {
+		w.WriteHeader(rw.statusCode)
+		w.Write(rw.body.Bytes())
+		return
+	}
+
+	// 只拦截 login 和 refresh-token 路径的响应
+	cleaned := path.Clean(r.URL.Path)
+	if cleaned != "/api/v1/user/login" && cleaned != "/api/v1/user/refresh-token" {
+		if rw.statusCode != 0 {
+			w.WriteHeader(rw.statusCode)
+		}
+		w.Write(rw.body.Bytes())
+		return
+	}
+
+	// 尝试解析 JSON，提取 refreshToken
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rw.body.Bytes(), &resp); err != nil {
+		// JSON 解析失败，直接返回原始响应
+		if rw.statusCode != 0 {
+			w.WriteHeader(rw.statusCode)
+		}
+		w.Write(rw.body.Bytes())
+		return
+	}
+
+	// 提取 refreshToken 并设置 cookie
+	if rt, ok := resp["refreshToken"].(string); ok && rt != "" {
+		setRefreshTokenCookie(w, rt)
+		delete(resp, "refreshToken")
+	}
+
+	// 写回修改后的 JSON
+	modified, err := json.Marshal(resp)
+	if err != nil {
+		// marshal 失败，返回原始响应
+		if rw.statusCode != 0 {
+			w.WriteHeader(rw.statusCode)
+		}
+		w.Write(rw.body.Bytes())
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Del("Content-Length") // 删除原始长度，http 包会自动计算
+	w.WriteHeader(http.StatusOK)
+	w.Write(modified)
+}
+
+// injectRefreshTokenFromCookie 从 cookie 中读取 refresh token 并注入到请求 body
+func injectRefreshTokenFromCookie(w http.ResponseWriter, r *http.Request) bool {
+	if r.URL.Path != "/api/v1/user/refresh-token" || r.Method != http.MethodPost {
+		return true
+	}
+
+	// 如果请求 body 中已有 refreshToken，不需要注入
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4096))
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code":400,"message":"bad request"}`))
+		return false
+	}
+
+	var req map[string]interface{}
+	if json.Unmarshal(body, &req) == nil {
+		if _, ok := req["refreshToken"].(string); ok && req["refreshToken"].(string) != "" {
+			r.Body = io.NopCloser(bytes.NewReader(body))
+			return true
+		}
+	}
+
+	// 从 cookie 中读取 refresh token
+	cookie, err := r.Cookie(refreshCookieName)
+	if err != nil || cookie.Value == "" {
+		// cookie 中也没有，放行让后续逻辑返回 401
+		r.Body = io.NopCloser(bytes.NewReader(body))
+		return true
+	}
+
+	// 注入到请求 body
+	if req == nil {
+		req = make(map[string]interface{})
+	}
+	req["refreshToken"] = cookie.Value
+	injected, err := json.Marshal(req)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"code":500,"message":"internal server error"}`))
+		return false
+	}
+
+	r.Body = io.NopCloser(bytes.NewReader(injected))
+	r.ContentLength = int64(len(injected))
+	return true
 }

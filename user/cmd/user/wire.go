@@ -4,6 +4,8 @@
 package main
 
 import (
+	"os"
+
 	"user/internal/biz"
 	"user/internal/conf"
 	"user/internal/data"
@@ -42,7 +44,10 @@ func newWireResult(app *kratos.App, appData *data.Data) wireResult {
 }
 
 func newJWT(c *conf.Jwt) *jwt.JWT {
-	return jwt.NewJWT(c.Secret, c.ExpireHours)
+	// Refresh Token 使用独立密钥（通过 JWT_REFRESH_SECRET 环境变量注入）
+	// 为空时复用 access token 密钥（向后兼容）
+	refreshSecret := os.Getenv("JWT_REFRESH_SECRET")
+	return jwt.NewJWT(c.Secret, refreshSecret, c.ExpireHours)
 }
 
 func newRedis(c *conf.Redis) (*redis.Redis, error) {

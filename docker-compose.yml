@@ -253,7 +253,7 @@ services:
     cap_drop:
       - ALL
     ports:
-      - "6001:6001"
+#      - "6001:6001"   # gRPC 端口，生产环境不暴露（仅容器间通信）
 #      - "9101:9101"   # metrics 端口，生产环境不暴露
     environment:
       TZ: *timezone
@@ -265,6 +265,7 @@ services:
       REDIS_PORT: "6379"
       ETCD_ENDPOINT: etcd:2379
       JWT_SECRET: *jwt-secret
+      JWT_REFRESH_SECRET: "storemicro_jwt_refresh_secret_2026_independent_from_access_64chars!!"
       METRICS_PASSWORD: *metrics-password
       LOG_LEVEL: info
       LOG_MODE: prod
@@ -320,7 +321,7 @@ services:
     cap_drop:
       - ALL
     ports:
-      - "6002:6002"
+#      - "6002:6002"   # gRPC 端口，生产环境不暴露（仅容器间通信）
 #      - "9103:9103"   # metrics 端口，生产环境不暴露
     environment:
       TZ: *timezone
@@ -439,7 +440,7 @@ services:
     user: "0:0"
     read_only: true
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
@@ -487,8 +488,8 @@ services:
     user: "0:0"
     ports:
       - "127.0.0.1:16686:16686"   # Jaeger UI（仅本机访问，生产应通过反向代理）
-      - "4317:4317"     # OTLP gRPC（内部服务上报用）
-      - "4318:4318"     # OTLP HTTP
+      - "127.0.0.1:4317:4317"     # OTLP gRPC（仅本机访问）
+      - "127.0.0.1:4318:4318"     # OTLP HTTP（仅本机访问）
     volumes:
       - ./jaeger/jaeger-config.yaml:/etc/jaeger/config.yaml:ro
       - ./jaeger/data:/var/lib/jaeger

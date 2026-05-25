@@ -4,12 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net"
 	"net/http"
-	"runtime/debug"
 	"strconv"
 	"time"
+
+	pkglog "github.com/storemicro/pkg/zaplogger"
+	"go.uber.org/zap"
 )
 
 // ReadinessCheck readiness check 函数类型
@@ -79,12 +80,14 @@ func StartHealthServer(cfg Config) (*http.Server, error) {
 		mux.Handle("/metrics", cfg.MetricsHandler)
 	}
 
-	// panic recovery 中间件
+	// panic recovery 中间件（使用 zap logger 记录结构化日志）
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
 			if rec := recover(); rec != nil {
-				stack := debug.Stack()
-				log.Printf("[PANIC] health server: %v\n%s", rec, stack)
+				pkglog.L().Error("panic recovered in health server",
+					zap.Any("error", rec),
+					zap.Stack("stack"),
+				)
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.WriteHeader(http.StatusInternalServerError)
 				_, _ = w.Write([]byte(`{"code":500,"message":"internal server error"}`))
