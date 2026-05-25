@@ -4,9 +4,9 @@
 build:
 	go build -o bin/user.exe ./cmd/user/
 
-# 运行测试
+# 运行测试（启用 race detector）
 test:
-	go test ./...
+	go test -race -count=1 ./...
 
 # protobuf 代码生成
 generate:
@@ -19,9 +19,14 @@ generate:
 wire:
 	cd cmd/user && wire
 
-# 静态检查
+# 静态检查（golangci-lint 优先，回退 go vet）
 lint:
-	go vet ./...
+	@if command -v golangci-lint > /dev/null 2>&1; then \
+		golangci-lint run ./...; \
+	else \
+		echo "golangci-lint not found, falling back to go vet"; \
+		go vet ./...; \
+	fi
 
 # 清理构建产物
 clean:

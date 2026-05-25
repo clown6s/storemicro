@@ -169,38 +169,27 @@ func newRootMux(proxy *gwproxy.Proxy, metricsPassword string) http.Handler {
 		_, _ = w.Write(b)
 	})
 
-	// 就绪检查端点（Kubernetes readiness probe — 检查关键依赖）
+	// 就绪检查端点（Kubernetes readiness probe — 检查关键依赖，不暴露内部组件名称）
 	mux.HandleFunc("/readyz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		checks := map[string]string{}
+		allOk := true
 
 		// Redis（显式 3s 超时）
 		redisCtx, redisCancel := context.WithTimeout(r.Context(), 3*time.Second)
 		if err := proxy.Rdb().Ping(redisCtx).Err(); err != nil {
 			redisCancel()
-			pkglog.L().Warn("readyz: redis unhealthy", zap.Error(err))
-			checks["redis"] = "unhealthy"
+			pkglog.L().Warn("readyz: dependency unhealthy", zap.String("component", "redis"), zap.Error(err))
+			allOk = false
 		} else {
 			redisCancel()
-			checks["redis"] = "ok"
 		}
 
 		// etcd — 用短超时的 KV Get 验证连通性
 		etcdTimeout, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		defer cancel()
 		if _, etcdErr := proxy.EtcdClient().Get(etcdTimeout, "health-check-nonexistent-key"); etcdErr != nil {
-			pkglog.L().Warn("readyz: etcd unhealthy", zap.Error(etcdErr))
-			checks["etcd"] = "unhealthy"
-		} else {
-			checks["etcd"] = "ok"
-		}
-
-		allOk := true
-		for _, v := range checks {
-			if v != "ok" {
-				allOk = false
-				break
-			}
+			pkglog.L().Warn("readyz: dependency unhealthy", zap.String("component", "etcd"), zap.Error(etcdErr))
+			allOk = false
 		}
 
 		status := "ok"
@@ -210,7 +199,7 @@ func newRootMux(proxy *gwproxy.Proxy, metricsPassword string) http.Handler {
 			code = http.StatusServiceUnavailable
 		}
 
-		b, err := json.Marshal(map[string]any{"status": status, "checks": checks})
+		b, err := json.Marshal(map[string]string{"status": status})
 		if err != nil {
 			pkglog.L().Error("readyz json marshal failed", zap.Error(err))
 			w.WriteHeader(http.StatusInternalServerError)

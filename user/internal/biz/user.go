@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"user/internal/pkg/common"
 	"user/internal/pkg/jwt"
 	"user/internal/pkg/redis"
 
@@ -23,8 +24,8 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// bcryptCost bcrypt 加密 cost 因子（硬件性能提升时应随之增加）
-const bcryptCost = 12
+// bcryptCost 使用公共常量，与 data 层保持一致
+const bcryptCost = common.BCryptCost
 
 // ProviderSet is biz providers.
 var ProviderSet = wire.NewSet(NewUserUsecase)

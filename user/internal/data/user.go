@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"user/internal/biz"
+	"user/internal/pkg/common"
 	"user/internal/pkg/snowflake"
 
 	"github.com/go-sql-driver/mysql"
@@ -93,8 +94,8 @@ func (r *userRepo) GetByPhone(ctx context.Context, phone string) (*biz.User, err
 	return user, nil
 }
 
-// bcryptCost bcrypt 加密 cost 因子（应与 biz 包保持一致）
-const bcryptCost = 12
+// bcryptCost 使用公共常量，与 biz 包保持一致
+const bcryptCost = common.BCryptCost
 
 // #21: 排序字段白名单（包级变量，避免每次请求重建）
 var allowedSortBy = map[string]string{

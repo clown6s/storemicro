@@ -41,5 +41,8 @@ redis:
 
 # 链路追踪
 tracing:
-  endpoint: ""
-  sampleRate: 0.1
+  endpoint: "${TRACING_ENDPOINT:10.211.55.5:4317}"
+  sampleRate: 1.0
+
+# Prometheus metrics 认证密码
+metricsPassword: "${METRICS_PASSWORD:dev123}"

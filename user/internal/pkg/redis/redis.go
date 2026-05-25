@@ -254,12 +254,12 @@ func (r *Redis) InvalidateUserRefreshTokens(ctx context.Context, userID int64) e
 }
 
 // CheckRegisterPhoneRateLimit 检查手机号注册频率（5分钟内同一手机号只能注册一次）
-// Redis 故障时 fail-open，不影响注册
+// Redis 故障时 fail-closed，拒绝注册（与 gateway 层 IP 限流策略保持一致，防止 Redis 宕机时被批量注册）
 func (r *Redis) CheckRegisterPhoneRateLimit(ctx context.Context, phone string) error {
 	key := r.registerPhoneLimitKey(phone)
 	ok, err := r.client.SetNX(ctx, key, "1", 5*time.Minute).Result()
 	if err != nil {
-		return nil // fail-open
+		return fmt.Errorf("redis unavailable, rejecting registration for rate limit safety: %w", err)
 	}
 	if !ok {
 		return errors.New("too many registration attempts for this phone number")

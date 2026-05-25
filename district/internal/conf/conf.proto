@@ -7,11 +7,12 @@ option go_package = "district/internal/conf;conf";
 import "google/protobuf/duration.proto";
 
 message Bootstrap {
-  Server   server   = 1;
-  Data     data     = 2;
-  Logger   logger   = 3;
-  Registry registry = 4;
-  Tracing  tracing  = 5;
+  Server   server            = 1;
+  Data     data              = 2;
+  Logger   logger            = 3;
+  Registry registry          = 4;
+  Tracing  tracing           = 5;
+  string   metrics_password  = 6;  // Prometheus metrics 认证密码，为空则禁用
 }
 
 message Tracing {

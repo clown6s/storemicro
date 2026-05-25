@@ -5,10 +5,17 @@
 #
 # 启动顺序: MySQL → Redis/etcd → user/district → gateway
 #
-# ⚠️ 生产环境部署前必须修改:
+# ⚠️⚠️⚠️ 生产环境部署前必须修改:
 # 1. x-password: 替换为强密码（至少32位，含大小写+数字+特殊字符）
 # 2. x-jwt-secret: 替换为独立的随机密钥（至少64位）
 # 3. x-metrics-password: 设置 metrics 监控密码
+#
+# 安全提示:
+# - 所有服务已启用 cap_drop ALL + no-new-privileges
+# - 微服务(user/district/gateway)运行在 read_only 文件系统
+# - 敏感信息建议通过 Docker Secrets 或外部 .env 文件管理
+#   参考 .env.example 模板: cp .env.example .env
+# - Jaeger 内存存储仅供开发/测试，生产需替换为持久化后端
 # ============================================================
 
 name: storemicro
@@ -44,6 +51,8 @@ services:
       TZ: *timezone
       MYSQL_ROOT_PASSWORD: *password
       MYSQL_DATABASE: store_micro
+      MYSQL_USER: storemicro_app
+      MYSQL_PASSWORD: *password
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -62,22 +71,41 @@ services:
       - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=128m
+      - /var/run/mysqld:rw,noexec,nosuid
     restart: always
     stop_grace_period: 60s
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+      - NET_RAW
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
     deploy:
       resources:
         limits:
           cpus: "2"
           memory: 1G
+          pids: 256
         reservations:
           memory: 256M
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "--silent"]
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 60s
     logging: *logging
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     networks:
       - internal
       - app
@@ -110,17 +138,24 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
     restart: always
     stop_grace_period: *stop-grace
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
           cpus: "0.5"
           memory: 256M
+          pids: 128
         reservations:
           memory: 64M
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$REDISCLI_AUTH\" ping 2>/dev/null"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -166,13 +201,20 @@ services:
       - "1048576"
     volumes:
       - etcd_data:/data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
     restart: always
     stop_grace_period: *stop-grace
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
     deploy:
       resources:
         limits:
           cpus: "0.5"
           memory: 256M
+          pids: 64
         reservations:
           memory: 64M
     healthcheck:
@@ -194,6 +236,15 @@ services:
       context: .
       dockerfile: user/Dockerfile
     container_name: storemicro-user
+    labels:
+      loki.enabled: "true"
+      loki.job: "user"
+    user: "1000:1000"
+    read_only: true
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
     ports:
       - "6001:6001"
       - "9101:9101"
@@ -212,6 +263,7 @@ services:
       LOG_MODE: prod
       GOGC: "100"
       GOMEMLIMIT: "400MiB"
+      TRACING_ENDPOINT: jaeger:4317
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     depends_on:
@@ -251,6 +303,15 @@ services:
       context: .
       dockerfile: district/Dockerfile
     container_name: storemicro-district
+    labels:
+      loki.enabled: "true"
+      loki.job: "district"
+    user: "1000:1000"
+    read_only: true
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
     ports:
       - "6002:6002"
       - "9103:9103"
@@ -265,6 +326,7 @@ services:
       LOG_MODE: prod
       GOGC: "100"
       GOMEMLIMIT: "200MiB"
+      TRACING_ENDPOINT: jaeger:4317
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=32m
     depends_on:
@@ -302,6 +364,15 @@ services:
       context: .
       dockerfile: gateway/Dockerfile
     container_name: storemicro-gateway
+    labels:
+      loki.enabled: "true"
+      loki.job: "gateway"
+    user: "1000:1000"
+    read_only: true
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
     ports:
       - "7000:7000"
     environment:
@@ -316,6 +387,7 @@ services:
       LOG_MODE: prod
       GOGC: "100"
       GOMEMLIMIT: "400MiB"
+      TRACING_ENDPOINT: jaeger:4317
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     depends_on:
@@ -350,6 +422,163 @@ services:
       - app
       - internal
 
+  # =========================
+  # 可观测性：链路追踪
+  # =========================
+
+  jaeger:
+    image: jaegertracing/jaeger:v2.3.0
+    container_name: storemicro-jaeger
+    # ⚠️ Jaeger UI 16686 端口直接暴露到宿主机，生产环境应通过反向代理+Basic Auth限制访问
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC
+      - "4318:4318"     # OTLP HTTP
+    volumes:
+      - ./jaeger/jaeger-config.yaml:/etc/jaeger/config.yaml:ro
+      - jaeger-data:/var/lib/jaeger
+    command: --config=/etc/jaeger/config.yaml
+    environment:
+      TZ: *timezone
+    restart: always
+    stop_grace_period: *stop-grace
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+          pids: 128
+        reservations:
+          memory: 128M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:13133/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    logging: *logging
+    networks:
+      - app
+
+  # =========================
+  # 可观测性：日志收集
+  # =========================
+
+  loki:
+    image: grafana/loki:3.5.1
+    container_name: storemicro-loki
+    ports:
+      - "3100:3100"
+    command: -config.file=/etc/loki/local-config.yaml -config.expand-env=true
+    volumes:
+      - loki_data:/loki
+    environment:
+      TZ: *timezone
+    restart: always
+    stop_grace_period: *stop-grace
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+          pids: 128
+        reservations:
+          memory: 64M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3100/ready || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging
+    networks:
+      - internal
+
+  promtail:
+    image: grafana/promtail:3.5.1
+    container_name: storemicro-promtail
+    user: "1000:1000"
+    group_add:
+      - "docker"
+    read_only: true
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    volumes:
+      - ./loki/promtail-config.yaml:/etc/promtail/config.yaml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/log:/var/log:ro
+    environment:
+      TZ: *timezone
+    command: -config.file=/etc/promtail/config.yaml
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: always
+    stop_grace_period: *stop-grace
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 128M
+        reservations:
+          memory: 32M
+    logging: *logging
+    networks:
+      - app
+      - internal
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    container_name: storemicro-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      TZ: *timezone
+      GF_SECURITY_ADMIN_USER: admin
+      # ⚠️ 生产环境必须修改 Grafana 密码（GF_SECURITY_ADMIN_PASSWORD）
+      GF_SECURITY_ADMIN_PASSWORD: *password
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    stop_grace_period: *stop-grace
+    security_opt:
+      - "no-new-privileges:true"
+    cap_drop:
+      - ALL
+      - CHOWN
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+          pids: 128
+        reservations:
+          memory: 64M
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging: *logging
+    networks:
+      - app
+
 # ============================================================
 # 网络
 # ============================================================
@@ -372,3 +601,9 @@ volumes:
     name: storemicro-redis-data
   etcd_data:
     name: storemicro-etcd-data
+  loki_data:
+    name: storemicro-loki-data
+  grafana_data:
+    name: storemicro-grafana-data
+  jaeger_data:
+    name: storemicro-jaeger-data

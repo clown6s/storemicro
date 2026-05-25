@@ -186,13 +186,17 @@ func main() {
 	// 健康检查 HTTP sidecar（默认 :9103，可通过 HEALTH_PORT 环境变量覆盖）
 	healthAddr := pkghealth.ValidateHealthPort(os.Getenv("HEALTH_PORT"), ":9103")
 
-	// Prometheus metrics 端点（必须配置 METRICS_PASSWORD 才启用，未配置时返回 401）
+	// Prometheus metrics 端点（优先读环境变量 METRICS_PASSWORD，其次读 config）
 	var metricsHandler http.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(`{"code":401,"message":"metrics endpoint requires METRICS_PASSWORD env"}`))
 	})
-	if metricsPassword := os.Getenv("METRICS_PASSWORD"); metricsPassword != "" {
+	metricsPassword := os.Getenv("METRICS_PASSWORD")
+	if metricsPassword == "" {
+		metricsPassword = bc.GetMetricsPassword()
+	}
+	if metricsPassword != "" {
 		metricsHandler = pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword)
 	}
 

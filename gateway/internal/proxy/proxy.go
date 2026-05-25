@@ -201,7 +201,7 @@ func New(cfg *appconfig.AppConfig, services []ServiceRegistration) (*Proxy, erro
 				UseProtoNames: false, // JSON 输出使用 camelCase（如 pageSize）而非 snake_case（如 page_size）
 			},
 			UnmarshalOptions: protojson.UnmarshalOptions{
-				DiscardUnknown: false,
+				DiscardUnknown: true,
 			},
 		}),
 		runtime.WithErrorHandler(customErrorHandler),

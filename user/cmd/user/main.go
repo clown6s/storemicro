@@ -195,10 +195,14 @@ func main() {
 	healthAddr := pkghealth.ValidateHealthPort(os.Getenv("HEALTH_PORT"), ":9101")
 
 	var metricsHandler http.Handler
-	if metricsPassword := os.Getenv("METRICS_PASSWORD"); metricsPassword != "" {
-		metricsHandler = pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword)
-	} else {
+	metricsPassword := os.Getenv("METRICS_PASSWORD")
+	if metricsPassword == "" {
+		metricsPassword = bc.GetMetricsPassword()
+	}
+	if metricsPassword == "" {
 		helper.Warn("metrics: no METRICS_PASSWORD configured, /metrics endpoint is disabled")
+	} else {
+		metricsHandler = pkgcmd.MetricsBearerAuth(promhttp.Handler(), metricsPassword)
 	}
 
 	healthCfg := pkghealth.Config{

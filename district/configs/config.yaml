@@ -25,5 +25,8 @@ registry:
     timeout: 10
 
 tracing:
-  endpoint: ""
-  sampleRate: 0.1
+  endpoint: "${TRACING_ENDPOINT:10.211.55.5:4317}"
+  sampleRate: 1.0
+
+# Prometheus metrics 认证密码（为空则禁用 metrics 端点）
+metricsPassword: "${METRICS_PASSWORD:dev123}"

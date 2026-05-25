@@ -6,9 +6,9 @@ build:
 	go build -o bin/district.exe ./district/cmd/district/
 	go build -o bin/gateway.exe ./gateway/cmd/gateway/
 
-# 运行测试
+# 运行测试（启用 race detector）
 test:
-	go test ./user/... ./district/... ./gateway/... ./pkg/...
+	go test -race -count=1 ./user/... ./district/... ./gateway/... ./pkg/...
 
 # 同步 proto 文件：从服务源目录复制到 gateway（proto 的单一源头在 user/ 和 district/）
 sync-proto:
@@ -48,9 +48,14 @@ docker-up:
 docker-down:
 	docker compose down
 
-# 静态检查
+# 静态检查（golangci-lint 优先，回退 go vet）
 lint:
-	go vet ./...
+	@if command -v golangci-lint > /dev/null 2>&1; then \
+		golangci-lint run ./user/... ./district/... ./gateway/... ./pkg/...; \
+	else \
+		echo "golangci-lint not found, falling back to go vet"; \
+		go vet ./user/... ./district/... ./gateway/... ./pkg/...; \
+	fi
 
 # 清理构建产物
 clean:

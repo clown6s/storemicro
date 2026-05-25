@@ -3,8 +3,9 @@ FROM golang:1.26-alpine AS builder
 
 RUN apk add --no-cache git
 
-# China Go module proxy (multiple fallback sources for reliability)
-ENV GOPROXY=https://goproxy.cn,https://goproxy.io,https://proxy.golang.org,direct
+# Go module proxy（构建时可通过 --build-arg GOPROXY=... 覆盖）
+ARG GOPROXY=https://goproxy.cn,https://goproxy.io,https://proxy.golang.org,direct
+ENV GOPROXY=${GOPROXY}
 ENV GOSUMDB=sum.golang.org
 ENV GONOSUMDB=off
 
@@ -34,12 +35,13 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     -o /bin/user ./cmd/user
 
 # Runtime stage — minimal attack surface
-FROM alpine:3.20
+FROM alpine:3.21
 
 RUN apk add --no-cache ca-certificates tzdata && \
-    adduser -D -u 1000 appuser && \
+    adduser -D -u 1000 -s /sbin/nologin appuser && \
     mkdir -p /app/configs && \
-    chown appuser:appuser /app/configs
+    chown appuser:appuser /app/configs && \
+    chmod 700 /app/configs
 
 ENV TZ=Asia/Shanghai
 

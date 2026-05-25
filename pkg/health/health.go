@@ -34,10 +34,10 @@ func StartHealthServer(cfg Config) (*http.Server, error) {
 
 	mux := http.NewServeMux()
 
-	// /healthz — liveness probe（仅检查进程存活）
+	// /healthz — liveness probe（仅检查进程存活，不暴露服务名称防指纹识别）
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		b, err := json.Marshal(map[string]string{"status": "ok", "service": cfg.ServiceName})
+		b, err := json.Marshal(map[string]string{"status": "ok"})
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
