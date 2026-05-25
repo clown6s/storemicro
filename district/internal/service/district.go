@@ -75,8 +75,7 @@ func (d *DistrictService) WarmupTreeCache(ctx context.Context) {
 		return
 	}
 	if len(districts) == 0 {
-		zap.L().Warn("WarmupTreeCache: no districts loaded")
-		d.treeCache.Store(&districtv1.GetProvinceTreeResp{Data: []*districtv1.DistrictTree{}})
+		zap.L().Warn("WarmupTreeCache: no districts loaded, skip caching")
 		return
 	}
 
