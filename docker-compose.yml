@@ -427,7 +427,7 @@ services:
   # =========================
 
   jaeger:
-    image: jaegertracing/jaeger:v2.3.0
+    image: jaegertracing/jaeger:2.3.0
     container_name: storemicro-jaeger
     # ⚠️ Jaeger UI 16686 端口直接暴露到宿主机，生产环境应通过反向代理+Basic Auth限制访问
     ports:
