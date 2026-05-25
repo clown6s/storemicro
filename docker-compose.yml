@@ -67,8 +67,8 @@ services:
       - --log-queries-not-using-indexes=1
       - --sql-mode=STRICT_TRANS_TABLES,NO_ZERO_IN_DATE,NO_ZERO_DATE,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION
       - --local-infile=0
-    ports:
-      - "3306:3306"
+#    ports:
+#      - "3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     tmpfs:
@@ -119,7 +119,7 @@ services:
     command:
       - redis-server
       - --requirepass
-      - "CHANGE_ME_STRONG_PASSWORD_32CHARS_MIN"
+      - *password
       - --appendonly
       - "yes"
       - --appendfsync
@@ -134,8 +134,8 @@ services:
       - "300"
       - --timeout
       - "0"
-    ports:
-      - "6379:6379"
+#    ports:
+#      - "6379:6379"
     volumes:
       - redis_data:/data
     tmpfs:
@@ -436,7 +436,7 @@ services:
   jaeger:
     image: jaegertracing/jaeger:2.3.0
     container_name: storemicro-jaeger
-    # ⚠️ Jaeger UI 16686 端口直接暴露到宿主机，生产环境应通过反向代理+Basic Auth限制访问
+    user: "0:0"
     ports:
       - "16686:16686"   # Jaeger UI
       - "4317:4317"     # OTLP gRPC
@@ -468,7 +468,7 @@ services:
         reservations:
           memory: 128M
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:13133/healthz || exit 1"]
+      test: ["CMD-SHELL", "wget -qO- http://localhost:13133/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5
