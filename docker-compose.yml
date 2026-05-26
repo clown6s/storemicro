@@ -252,9 +252,7 @@ services:
       - "no-new-privileges:true"
     cap_drop:
       - ALL
-    ports:
-#      - "6001:6001"   # gRPC 端口，生产环境不暴露（仅容器间通信）
-#      - "9101:9101"   # metrics 端口，生产环境不暴露
+    # ports: gRPC 6001、metrics 9101 生产环境不暴露（仅容器间通信）
     environment:
       TZ: *timezone
       DB_PASSWORD: *password
@@ -320,9 +318,7 @@ services:
       - "no-new-privileges:true"
     cap_drop:
       - ALL
-    ports:
-#      - "6002:6002"   # gRPC 端口，生产环境不暴露（仅容器间通信）
-#      - "9103:9103"   # metrics 端口，生产环境不暴露
+    # ports: gRPC 6002、metrics 9103 生产环境不暴露（仅容器间通信）
     environment:
       TZ: *timezone
       DB_PASSWORD: *password

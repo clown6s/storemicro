@@ -541,6 +541,13 @@ func (rw *refreshCookieResponseWriter) Flush() {
 
 // stripRefreshTokenFromResponse 拦截 login/refresh 响应，将 refreshToken 从 JSON body 中移除并设置为 HttpOnly Cookie
 func stripRefreshTokenFromResponse(w http.ResponseWriter, r *http.Request, next http.Handler) {
+	// login/refresh-token 响应需要拦截修改 JSON body（提取 refreshToken 设为 HttpOnly Cookie），
+	// 因此必须阻止 gzip 压缩，否则拿到的是压缩字节无法 json.Unmarshal
+	cleaned := path.Clean(r.URL.Path)
+	if cleaned == "/api/v1/user/login" || cleaned == "/api/v1/user/refresh-token" {
+		r.Header.Del("Accept-Encoding")
+	}
+
 	rw := &refreshCookieResponseWriter{ResponseWriter: w}
 	next.ServeHTTP(rw, r)
 
@@ -552,7 +559,6 @@ func stripRefreshTokenFromResponse(w http.ResponseWriter, r *http.Request, next 
 	}
 
 	// 只拦截 login 和 refresh-token 路径的响应
-	cleaned := path.Clean(r.URL.Path)
 	if cleaned != "/api/v1/user/login" && cleaned != "/api/v1/user/refresh-token" {
 		if rw.statusCode != 0 {
 			w.WriteHeader(rw.statusCode)
